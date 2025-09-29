@@ -819,7 +819,6 @@ function TimerDisplay({
   if (runningSession) {
     return (
       <>
-        <div className="text-xs opacity-70">Running</div>
         <div className="text-lg font-semibold mt-1">{runningName}</div>
         <div className="text-sm mt-1">{formatHMS(displayTime)}</div>
       </>
@@ -1551,7 +1550,6 @@ export default function TimeTrackerMVP() {
                 <div className="text-xs opacity-70 mb-1">{todayStr}</div>
                 {runningSession ? (
                   <>
-                    <div className="text-xs opacity-70">Running</div>
                     <div className="text-lg font-semibold mt-1">{runningName}</div>
                     <div className="text-sm mt-1">{formatHMS(runningTotalSeconds)}</div>
                   </>
@@ -1576,11 +1574,11 @@ export default function TimeTrackerMVP() {
           <div className="flex items-center mb-3">
             <div className="w-40 flex items-center gap-2">
               {currentParentId && (
-                <button onClick={goBack} className="px-3 py-2 rounded-xl border border-[#2a2f45] bg-[#0f1117] hover:border-white/50">← Back</button>
+                <button onClick={goBack} className="px-2 py-2 rounded-xl border border-[#2a2f45] bg-[#0f1117] hover:border-white/50">← Back</button>
               )}
               <button
                 onClick={() => setEditMode((e) => !e)}
-                className={`px-3 py-2 rounded-xl border bg-[#0f1117] ${editMode ? "border-white/70" : "border-[#2a2f45] opacity-60"}`}
+                className={`px-2 py-2 rounded-xl border bg-[#0f1117] ${editMode ? "border-white/70" : "border-[#2a2f45] opacity-60"}`}
                 title="Edit"
               >
                 <Pencil size={16} />
@@ -1593,7 +1591,7 @@ export default function TimeTrackerMVP() {
               {!adderOpen && (
                 <button
                   onClick={openAdder}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[#2a2f45] hover:border-white/50 bg-[#0f1117]"
+                  className="flex items-center gap-2 px-2 py-2 rounded-xl border border-[#2a2f45] hover:border-white/50 bg-[#0f1117]"
                 >
                   <Plus size={16} /> Add {currentParentId ? "Subcategory" : "Category"}
                 </button>
