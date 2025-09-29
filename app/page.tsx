@@ -427,7 +427,7 @@ function VisionPage({
         setEditingSub("");
       } else {
         // It's a subcategory
-        setEditingCat(currentCategory.parentId);
+        setEditingCat(currentCategory.parentId || "");
         setEditingSub(currentCategory.id);
       }
     }
