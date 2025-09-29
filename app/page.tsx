@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { PieChart, Pie, Cell, Tooltip } from "recharts";
 import { Plus, Check, Pencil, Trash2, ChevronRight } from "lucide-react";
 
 // --- Types ---
@@ -343,6 +343,45 @@ function generateColorShade(baseColor: string, shadeIndex: number): string {
   // Convert back to hex
   const toHex = (n: number) => n.toString(16).padStart(2, '0');
   return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
+}
+
+function useElementSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof window === "undefined" || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const updateSize = () => {
+      const rect = node.getBoundingClientRect();
+      setSize((prev) => {
+        const next = { width: rect.width, height: rect.height };
+        return prev.width === next.width && prev.height === next.height ? prev : next;
+      });
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === node) {
+          const { width, height } = entry.contentRect;
+          setSize((prev) => {
+            const next = { width, height };
+            return prev.width === next.width && prev.height === next.height ? prev : next;
+          });
+        }
+      }
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, size] as const;
 }
 
 // VisionPage component - defined outside to prevent re-creation on timer updates
@@ -1470,6 +1509,16 @@ export default function TimeTrackerMVP() {
 
 
   function TimePage() {
+    const [chartRef, chartSize] = useElementSize<HTMLDivElement>();
+    const hasMeasurement = chartSize.width > 0 && chartSize.height > 0;
+    const baseSize = 220;
+    const pieSize = hasMeasurement
+      ? Math.min(chartSize.width, chartSize.height)
+      : baseSize;
+    const radiusScale = pieSize / baseSize;
+    const innerRadius = 80 * radiusScale;
+    const outerRadius = 110 * radiusScale;
+
     return (
       <>
         {/* Top legend */}
@@ -1508,40 +1557,40 @@ export default function TimeTrackerMVP() {
                 ))}
               </div>
             </div>
-            <div className="h-56"
+            <div
+                 ref={chartRef}
+                 className="h-56 flex items-center justify-center"
                  onMouseEnter={() => { setChartHover(true); hoverNowRef.current = Date.now(); }}
                  onMouseLeave={() => { setChartHover(false); hoverNowRef.current = null; }}
             >
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  {/* Background ring so the dial is always visible */}
-                  <Pie data={[{ name: "track", value: 1 }]}
-                       innerRadius={80}
-                       outerRadius={110}
-                       dataKey="value"
-                       isAnimationActive={false}
-                  >
-                    <Cell fill="#23283f" />
-                  </Pie>
-                  {/* Actual data overlay */}
-                  <Pie
-                    data={chartData}
-                    innerRadius={80}
-                    outerRadius={110}
-                    dataKey="value"
-                    paddingAngle={2}
-                    isAnimationActive={false}
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`slice-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: any, name: any) => [formatHMS(Number(value)), name]}
-                    contentStyle={{ background: "#0f1117", border: "1px solid #2a2f45", borderRadius: 12, color: "#fff" }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              <PieChart width={pieSize} height={pieSize}>
+                {/* Background ring so the dial is always visible */}
+                <Pie data={[{ name: "track", value: 1 }]}
+                     innerRadius={innerRadius}
+                     outerRadius={outerRadius}
+                     dataKey="value"
+                     isAnimationActive={false}
+                >
+                  <Cell fill="#23283f" />
+                </Pie>
+                {/* Actual data overlay */}
+                <Pie
+                  data={chartData}
+                  innerRadius={innerRadius}
+                  outerRadius={outerRadius}
+                  dataKey="value"
+                  paddingAngle={2}
+                  isAnimationActive={false}
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell key={`slice-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: any, name: any) => [formatHMS(Number(value)), name]}
+                  contentStyle={{ background: "#0f1117", border: "1px solid #2a2f45", borderRadius: 12, color: "#fff" }}
+                />
+              </PieChart>
             </div>
 
             {/* Center content of the dial */}
