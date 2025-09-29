@@ -1546,7 +1546,7 @@ export default function TimeTrackerMVP() {
 
             {/* Center content of the dial */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
+              <div className="text-center mt-1">
                 <div className="text-xs opacity-70 mb-1">{todayStr}</div>
                 {runningSession ? (
                   <>
@@ -1555,7 +1555,6 @@ export default function TimeTrackerMVP() {
                   </>
                 ) : (
                   <>
-                    <div className="text-xs opacity-70">Select Range</div>
                     <div className="text-[13px] opacity-80 mt-1">{range}</div>
                   </>
                 )}
@@ -1574,7 +1573,7 @@ export default function TimeTrackerMVP() {
           <div className="flex items-center mb-3">
             <div className="w-40 flex items-center gap-2">
               {currentParentId && (
-                <button onClick={goBack} className="px-2 py-2 rounded-xl border border-[#2a2f45] bg-[#0f1117] hover:border-white/50">← Back</button>
+                <button onClick={goBack} className="px-2 py-2 rounded-xl border border-[#2a2f45] bg-[#0f1117] hover:border-white/50" title="Back">←</button>
               )}
               <button
                 onClick={() => setEditMode((e) => !e)}
@@ -1591,9 +1590,10 @@ export default function TimeTrackerMVP() {
               {!adderOpen && (
                 <button
                   onClick={openAdder}
-                  className="flex items-center gap-2 px-2 py-2 rounded-xl border border-[#2a2f45] hover:border-white/50 bg-[#0f1117]"
+                  className="px-2 py-2 rounded-xl border border-[#2a2f45] hover:border-white/50 bg-[#0f1117]"
+                  title={currentParentId ? "Add Subcategory" : "Add Category"}
                 >
-                  <Plus size={16} /> Add {currentParentId ? "Subcategory" : "Category"}
+                  <Plus size={16} />
                 </button>
               )}
             </div>
