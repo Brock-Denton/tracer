@@ -1717,8 +1717,8 @@ export default function TimeTrackerMVP() {
       />}
 
       {/* Bottom Nav */}
-      <div className="border-t border-[#1f2337] bg-[#0f1117] p-3 mt-6">
-        <div className="flex justify-around text-sm opacity-80">
+      <div className="border-t border-[#1f2337] bg-[#0f1117] p-6 mt-6">
+        <div className="flex justify-around text-lg opacity-80">
           <button onClick={()=>setPage("Home")} className={page==="Home"?"text-blue-400":""}>Home</button>
           <button onClick={()=>setPage("Time")} className={page==="Time"?"text-blue-400":""}>Time</button>
           <button onClick={()=>setPage("Vision")} className={page==="Vision"?"text-blue-400":""}>Vision</button>
