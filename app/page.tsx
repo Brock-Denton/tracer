@@ -414,8 +414,20 @@ function VisionPage({
   const editingSubcats = useMemo(() => categories.filter(c => c.parentId === (editingCat || null)), [categories, editingCat]);
 
   function onUpload(idx: number, file: File) {
-    const url = URL.createObjectURL(file);
-    setVisionPhotos(prev => prev.map((p, i) => i === idx ? { ...p, src: url, alt: file.name || p.alt } : p));
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : null;
+      if (!result) return;
+      setVisionPhotos(prev => prev.map((p, i) => (
+        i === idx
+          ? { ...p, src: result, alt: file.name || p.alt }
+          : p
+      )));
+    };
+    reader.onerror = () => {
+      console.error("Failed to read image file");
+    };
+    reader.readAsDataURL(file);
   }
 
   function createNewRoot() {
