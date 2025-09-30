@@ -2571,14 +2571,17 @@ export default function TimeTrackerMVP() {
         isAuthenticated={isAuthenticated}
       />}
 
-      {/* Bottom Nav */}
-      <div className="border-t border-[#1f2337] bg-[#0f1117] p-6 mt-6">
+      {/* Bottom Nav - Fixed to bottom */}
+      <div className="fixed bottom-0 left-0 right-0 border-t border-[#1f2337] bg-[#0f1117] p-6 z-50">
         <div className="flex justify-around text-lg opacity-80">
           <button onClick={()=>setPage("Home")} className={page==="Home"?"text-blue-400":""}>Home</button>
           <button onClick={()=>setPage("Time")} className={page==="Time"?"text-blue-400":""}>Time</button>
           <button onClick={()=>setPage("Vision")} className={page==="Vision"?"text-blue-400":""}>Vision</button>
         </div>
       </div>
+      
+      {/* Spacer for fixed bottom nav */}
+      <div className="h-24"></div>
 
       {/* Editor modal */}
       {editingId && (
