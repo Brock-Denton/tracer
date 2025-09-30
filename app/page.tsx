@@ -180,14 +180,14 @@ const DEFAULT_CATEGORIES: Category[] = [
 ];
 
 const DEFAULT_VISION: VisionPhoto[] = [
-  // First 4 photos (hidden grid - indices 0-3)
-  { id: uid(), src: "https://images.unsplash.com/photo-1505691723518-36a5ac3b2b8f?auto=format&fit=crop&w=800&q=60", alt: "Dream home by the lake" },
+  // First 4 photos (hidden grid - indices 0-3) - using duplicates of working photos
+  { id: uid(), src: "https://images.unsplash.com/photo-1496302662116-35cc4f36df92?auto=format&fit=crop&w=800&q=60", alt: "Financial freedom" },
   { id: uid(), src: "https://images.unsplash.com/photo-1496302662116-35cc4f36df92?auto=format&fit=crop&w=800&q=60", alt: "Financial freedom" },
   { id: uid(), src: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=800&q=60", alt: "Healthy strong body" },
   { id: uid(), src: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=60", alt: "Adventure and travel" },
   // Second 4 photos (visible grid - indices 4-7)
-  { id: uid(), src: "https://images.unsplash.com/photo-1505691723518-36a5ac3b2b8f?auto=format&fit=crop&w=800&q=60", alt: "Dream home by the lake" },
   { id: uid(), src: "https://images.unsplash.com/photo-1496302662116-35cc4f36df92?auto=format&fit=crop&w=800&q=60", alt: "Financial freedom" },
+  { id: uid(), src: "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=60", alt: "Dream home" },
   { id: uid(), src: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=800&q=60", alt: "Healthy strong body" },
   { id: uid(), src: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=60", alt: "Adventure and travel" },
 ];
@@ -1356,9 +1356,11 @@ export default function TimeTrackerMVP() {
             alt: v.alt
           })));
           
-          // Initialize default vision photos if none exist
-          if (visionPhotosData.length === 0) {
-            for (const photo of DEFAULT_VISION) {
+          // Initialize default vision photos if less than 8 exist
+          if (visionPhotosData.length < 8) {
+            // Create only the missing photos to reach 8 total
+            const photosToCreate = DEFAULT_VISION.slice(visionPhotosData.length);
+            for (const photo of photosToCreate) {
               await dataService.createVisionPhoto({
                 src: photo.src,
                 alt: photo.alt
@@ -1696,10 +1698,10 @@ export default function TimeTrackerMVP() {
       setTempName("");
       setIsAuthenticated(false);
       setAuthMode("login");
-      setCategories([]);
+      setCategories(DEFAULT_CATEGORIES);
       setSessions([]);
       setGoals([]);
-      setVisionPhotos([]);
+      setVisionPhotos(DEFAULT_VISION);
       setActiveId(null);
     } catch (error) {
       console.error("Logout error:", error);
