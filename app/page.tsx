@@ -180,6 +180,12 @@ const DEFAULT_CATEGORIES: Category[] = [
 ];
 
 const DEFAULT_VISION: VisionPhoto[] = [
+  // First 4 photos (hidden grid - indices 0-3)
+  { id: uid(), src: "https://images.unsplash.com/photo-1505691723518-36a5ac3b2b8f?auto=format&fit=crop&w=800&q=60", alt: "Dream home by the lake" },
+  { id: uid(), src: "https://images.unsplash.com/photo-1496302662116-35cc4f36df92?auto=format&fit=crop&w=800&q=60", alt: "Financial freedom" },
+  { id: uid(), src: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=800&q=60", alt: "Healthy strong body" },
+  { id: uid(), src: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=60", alt: "Adventure and travel" },
+  // Second 4 photos (visible grid - indices 4-7)
   { id: uid(), src: "https://images.unsplash.com/photo-1505691723518-36a5ac3b2b8f?auto=format&fit=crop&w=800&q=60", alt: "Dream home by the lake" },
   { id: uid(), src: "https://images.unsplash.com/photo-1496302662116-35cc4f36df92?auto=format&fit=crop&w=800&q=60", alt: "Financial freedom" },
   { id: uid(), src: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=800&q=60", alt: "Healthy strong body" },
@@ -682,16 +688,32 @@ function VisionPage({
   return (
     <div className="px-5 mt-6 flex-1">
       <div className="max-w-3xl mx-auto space-y-5">
-        {/* Top grid of photos - only show first 4 photos, hide first 2 */}
+        {/* First grid of photos (hidden - indices 0-3) */}
+        <div className="hidden">
+          <div className="grid grid-cols-2 gap-4">
+            {visionPhotos.slice(0, 4).map((p, idx) => (
+              <div key={`hidden-${p.id}`} className="relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden">
+                <div className="aspect-square overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.src} alt={p.alt} className="w-full h-full object-cover" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Second grid of photos (visible - indices 4-7) */}
         <div className="grid grid-cols-2 gap-4">
-          {visionPhotos.slice(0, 4).map((p, idx) => (
-            <div key={p.id} className={`relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden ${idx < 2 ? 'hidden' : ''}`}>
+          {visionPhotos.slice(4, 8).map((p, idx) => {
+            const actualIdx = idx + 4; // Map to actual index 4-7
+            return (
+            <div key={p.id} className="relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden">
               <div className="aspect-square overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.src} alt={p.alt} className="w-full h-full object-cover" />
               </div>
               
-              {editingImage === idx ? (
+              {editingImage === actualIdx ? (
                 <div className="p-2 bg-[#0f1117] border-t border-[#1f2337] space-y-2">
                   <input
                     type="text"
@@ -722,7 +744,7 @@ function VisionPage({
               ) : (
                 <div 
                   className="p-2 text-center text-xs opacity-80 bg-[#0f1117] border-t border-[#1f2337] cursor-pointer hover:opacity-100 transition-opacity"
-                  onClick={() => startEditingImage(idx, p.alt)}
+                  onClick={() => startEditingImage(actualIdx, p.alt)}
                   title="Click to edit"
                 >
                   {p.alt}
@@ -731,10 +753,10 @@ function VisionPage({
               
               <label className="absolute right-2 top-2 text-xs px-2 py-1 rounded-lg bg-[#0f1117]/80 border border-[#2a2f45] cursor-pointer hover:border-white/50">
                 Upload
-                <input type="file" accept="image/*" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUpload(idx, f); }} />
+                <input type="file" accept="image/*" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if (f) onUpload(actualIdx, f); }} />
               </label>
             </div>
-          ))}
+          )})}
         </div>
 
         {/* Middle panel: "computer screen" with goal entry */}
