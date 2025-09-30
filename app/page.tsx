@@ -1047,11 +1047,11 @@ function TimerDisplay({
 }
 
 // RangeSelector component - isolated from timer updates
-function RangeSelector({ 
-  range, 
-  rangeMenuOpen, 
-  setRangeMenuOpen, 
-  selectRange 
+function RangeSelector({
+  range,
+  rangeMenuOpen,
+  setRangeMenuOpen,
+  selectRange
 }: {
   range: Range;
   rangeMenuOpen: boolean;
@@ -1059,17 +1059,17 @@ function RangeSelector({
   selectRange: (newRange: Range) => void;
 }) {
   return (
-    <>
-      <button 
+    <div className="relative inline-flex flex-col items-center pointer-events-auto">
+      <button
         onClick={() => setRangeMenuOpen(!rangeMenuOpen)}
-        className="text-[13px] opacity-80 hover:opacity-100 transition-opacity pointer-events-auto"
+        className="px-3 py-1 text-sm font-medium text-white/90 rounded-full transition-colors hover:bg-white/10"
       >
-        {range} ▼
+        {range}
       </button>
-      
+
       {/* Range dropdown menu - positioned outside the dial */}
       {rangeMenuOpen && (
-        <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 bg-[#161925] border border-[#1f2337] rounded-xl shadow-xl z-50 min-w-[120px] pointer-events-auto">
+        <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 bg-[#161925] border border-[#1f2337] rounded-xl shadow-xl z-50 min-w-[140px]">
           {(["Today", "Week", "Month", "Year", "All"] as Range[]).map((r) => (
             <button
               key={r}
@@ -1083,7 +1083,7 @@ function RangeSelector({
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -2070,8 +2070,10 @@ export default function TimeTrackerMVP() {
       ? Math.min(chartSize.width, chartSize.height)
       : baseSize;
     const radiusScale = pieSize / baseSize;
-    const innerRadius = 80 * radiusScale;
-    const outerRadius = 110 * radiusScale;
+    const dialThickness = 30 * radiusScale;
+    const dialMargin = 6 * radiusScale;
+    const outerRadius = Math.max(pieSize / 2 - dialMargin, dialThickness);
+    const innerRadius = Math.max(outerRadius - dialThickness, 0);
 
     return (
       <>
@@ -2095,22 +2097,6 @@ export default function TimeTrackerMVP() {
         {/* Dial and Range selector */}
         <div className="px-5 mt-4">
           <div className="bg-[#161925] rounded-2xl p-5 shadow-lg relative overflow-visible">
-            {/* Range buttons */}
-            <div className="text-center -mt-6 mb-2 select-none relative z-10">
-              <div className="flex justify-center gap-3 mt-2 text-[13px] flex-wrap">
-                {(["Today", "Week", "Month", "Year", "All"] as Range[]).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setRange(r)}
-                    className={`px-3 py-1 rounded-full transition ${
-                      r === range ? "bg-white text-black" : "bg-[#23283f] text-white/90 hover:bg-[#293050]"
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
             <div
                  ref={chartRef}
                  className="h-56 flex items-center justify-center"
@@ -2120,6 +2106,8 @@ export default function TimeTrackerMVP() {
               <PieChart width={pieSize} height={pieSize}>
                 {/* Background ring so the dial is always visible */}
                 <Pie data={[{ name: "track", value: 1 }]}
+                     cx={pieSize / 2}
+                     cy={pieSize / 2}
                      innerRadius={innerRadius}
                      outerRadius={outerRadius}
                      dataKey="value"
@@ -2130,10 +2118,13 @@ export default function TimeTrackerMVP() {
                 {/* Actual data overlay */}
                 <Pie
                   data={chartData}
+                  cx={pieSize / 2}
+                  cy={pieSize / 2}
                   innerRadius={innerRadius}
                   outerRadius={outerRadius}
                   dataKey="value"
                   paddingAngle={2}
+                  cornerRadius={8}
                   isAnimationActive={false}
                 >
                   {chartData.map((entry, index) => (
@@ -2149,7 +2140,7 @@ export default function TimeTrackerMVP() {
 
             {/* Center content of the dial */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center mt-1">
+              <div className="text-center mt-1 pointer-events-none">
                 <div className="text-xs opacity-70 mb-1">{todayStr}</div>
                 {runningSession ? (
                   <>
@@ -2158,7 +2149,14 @@ export default function TimeTrackerMVP() {
                   </>
                 ) : (
                   <>
-                    <div className="text-[13px] opacity-80 mt-1">{range}</div>
+                    <div className="flex flex-col items-center gap-1 mt-1">
+                      <RangeSelector
+                        range={range}
+                        rangeMenuOpen={rangeMenuOpen}
+                        setRangeMenuOpen={setRangeMenuOpen}
+                        selectRange={selectRange}
+                      />
+                    </div>
                   </>
                 )}
                 <div className="text-center text-sm opacity-80 mt-2">
