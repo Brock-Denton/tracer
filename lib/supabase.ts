@@ -83,6 +83,9 @@ export interface Database {
           category_id: string
           text: string
           completed: boolean
+          total_seconds: number
+          is_active: boolean
+          last_start_time: string | null
           created_at: string
           updated_at: string
         }
@@ -92,6 +95,9 @@ export interface Database {
           category_id: string
           text: string
           completed?: boolean
+          total_seconds?: number
+          is_active?: boolean
+          last_start_time?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -101,6 +107,9 @@ export interface Database {
           category_id?: string
           text?: string
           completed?: boolean
+          total_seconds?: number
+          is_active?: boolean
+          last_start_time?: string | null
           created_at?: string
           updated_at?: string
         }

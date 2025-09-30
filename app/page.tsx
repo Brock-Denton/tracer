@@ -131,14 +131,33 @@ function buildChildMap(categories: Category[]) {
 function computeDirectSeconds(
   sessions: Session[],
   windowStart: number,
-  windowEnd: number
+  windowEnd: number,
+  goals?: Goal[]
 ): Record<string, number> {
   const totals: Record<string, number> = {};
+  
+  // Add session times
   for (const s of sessions) {
     const end = s.end ?? Date.now();
     const ms = overlapMs(s.start, end, windowStart, windowEnd);
     if (ms > 0) totals[s.categoryId] = (totals[s.categoryId] ?? 0) + ms / 1000;
   }
+  
+  // Add goal times
+  if (goals) {
+    for (const g of goals) {
+      // Calculate current elapsed time for active goals
+      const currentElapsed = g.isActive && g.lastStartTime 
+        ? Math.floor((Date.now() - g.lastStartTime) / 1000)
+        : 0;
+      const totalSeconds = (g.totalSeconds || 0) + currentElapsed;
+      
+      if (totalSeconds > 0) {
+        totals[g.categoryId] = (totals[g.categoryId] ?? 0) + totalSeconds;
+      }
+    }
+  }
+  
   return totals;
 }
 
@@ -525,14 +544,109 @@ function VisionPage({
     }
   }
 
-  async function toggleGoal(id: string) {
+  async function toggleGoalTimer(id: string) {
+    const goal = goals.find(g => g.id === id);
+    if (!goal || goal.completed) return; // Can't toggle timer on completed goals
+    
+    // Stop any other running goals first (just like categories)
+    const runningGoal = goals.find(g => g.isActive && g.id !== id);
+    
     if (isAuthenticated) {
       try {
-        const goal = goals.find(g => g.id === id);
-        if (!goal) return;
+        // Stop any currently running goal
+        if (runningGoal) {
+          const now = Date.now();
+          const sessionSeconds = runningGoal.lastStartTime 
+            ? Math.floor((now - runningGoal.lastStartTime) / 1000) 
+            : 0;
+          const newTotal = (runningGoal.totalSeconds || 0) + sessionSeconds;
+          
+          await dataService.updateGoal(runningGoal.id, {
+            is_active: false,
+            total_seconds: newTotal,
+            last_start_time: null
+          });
+        }
+        
+        if (goal.isActive) {
+          // Stop this timer
+          const now = Date.now();
+          const sessionSeconds = goal.lastStartTime 
+            ? Math.floor((now - goal.lastStartTime) / 1000) 
+            : 0;
+          const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+          
+          await dataService.updateGoal(id, {
+            is_active: false,
+            total_seconds: newTotal,
+            last_start_time: null
+          });
+        } else {
+          // Start timer on this goal
+          await dataService.updateGoal(id, {
+            is_active: true,
+            last_start_time: new Date().toISOString()
+          });
+        }
+        
+        // Manually refresh goals
+        const goalsData = await dataService.getGoals();
+        setGoals(() => goalsData.map(g => ({
+          id: g.id,
+          text: g.text,
+          categoryId: g.category_id,
+          completed: g.completed,
+          createdAt: new Date(g.created_at).getTime(),
+          totalSeconds: g.total_seconds || 0,
+          isActive: g.is_active || false,
+          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+        })));
+      } catch (error) {
+        console.error("Error toggling goal timer:", error);
+        alert("Failed to update goal timer. Please try again.");
+      }
+    } else {
+      // Local state for unauthenticated users
+      setGoals(prev => prev.map(g => {
+        if (g.id === id) {
+          if (g.isActive) {
+            // Stop this goal's timer
+            const now = Date.now();
+            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+          } else {
+            // Start this goal's timer
+            return { ...g, isActive: true, lastStartTime: Date.now() };
+          }
+        } else if (g.isActive) {
+          // Stop any other running goal
+          const now = Date.now();
+          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+        }
+        return g;
+      }));
+    }
+  }
+
+  async function toggleGoalCompletion(id: string) {
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return;
+    
+    if (isAuthenticated) {
+      try {
+        // If marking as complete and timer is running, stop it first
+        let finalTotalSeconds = goal.totalSeconds || 0;
+        if (!goal.completed && goal.isActive && goal.lastStartTime) {
+          const sessionSeconds = Math.floor((Date.now() - goal.lastStartTime) / 1000);
+          finalTotalSeconds += sessionSeconds;
+        }
         
         await dataService.updateGoal(id, {
-          completed: !goal.completed
+          completed: !goal.completed,
+          is_active: false,
+          total_seconds: finalTotalSeconds,
+          last_start_time: null
         });
         
         // Manually refresh goals
@@ -542,14 +656,17 @@ function VisionPage({
           text: g.text,
           categoryId: g.category_id,
           completed: g.completed,
-          createdAt: new Date(g.created_at).getTime()
+          createdAt: new Date(g.created_at).getTime(),
+          totalSeconds: g.total_seconds || 0,
+          isActive: g.is_active || false,
+          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
         })));
       } catch (error) {
-        console.error("Error toggling goal:", error);
+        console.error("Error toggling goal completion:", error);
         alert("Failed to update goal. Please try again.");
       }
     } else {
-      setGoals(prev => prev.map(g => g.id === id ? { ...g, completed: !g.completed } : g));
+      setGoals(prev => prev.map(g => g.id === id ? { ...g, completed: !g.completed, isActive: false } : g));
     }
   }
 
@@ -635,7 +752,10 @@ function VisionPage({
             text: g.text,
             categoryId: g.category_id,
             completed: g.completed,
-            createdAt: new Date(g.created_at).getTime()
+            createdAt: new Date(g.created_at).getTime(),
+            totalSeconds: g.total_seconds || 0,
+            isActive: g.is_active || false,
+            lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
           })));
         } catch (error) {
           console.error("Error deleting goal:", error);
@@ -825,13 +945,21 @@ function VisionPage({
                   const isEditing = editingGoal === g.id;
                   
                   const isRunning = g.isActive && !g.completed;
-                  const elapsedSeconds = g.totalSeconds || 0;
+                  const currentElapsed = g.lastStartTime 
+                    ? Math.floor((Date.now() - g.lastStartTime) / 1000)
+                    : 0;
+                  const totalElapsed = (g.totalSeconds || 0) + currentElapsed;
+                  const highlight = isRunning ? `${color}33` : undefined; // Tint active goal like categories
                   
                   return (
-                    <div key={g.id} className="flex items-center gap-3 p-2 bg-[#0b0e15] rounded-xl border border-[#1f2337]">
+                    <div 
+                      key={g.id} 
+                      className={`flex items-center gap-2 p-3 rounded-xl border ${isRunning ? 'border-blue-500' : 'border-[#1f2337]'}`}
+                      style={{ background: highlight || '#0b0e15' }}
+                    >
                       <button 
-                        onClick={()=>toggleGoal(g.id)} 
-                        className={`w-5 h-5 rounded-full border hover:opacity-80 transition-opacity ${g.completed ? '' : 'hover:bg-opacity-20'}`}
+                        onClick={()=>toggleGoalCompletion(g.id)} 
+                        className={`w-5 h-5 rounded-full border hover:opacity-80 transition-opacity flex-shrink-0`}
                         style={{ borderColor: color, background: g.completed ? color : 'transparent' }} 
                         title={g.completed ? "Mark incomplete" : "Mark complete"} 
                       />
@@ -894,16 +1022,25 @@ function VisionPage({
                           </div>
                         </div>
                       ) : (
-                        <div 
-                          className="flex-1 text-sm cursor-pointer hover:opacity-80 transition-opacity" 
-                          onClick={() => startEditing(g)}
-                          title="Click to edit"
-                        >
-                          {g.text}
-                        </div>
+                        <>
+                          <div 
+                            className="flex-1 cursor-pointer hover:opacity-80 transition-opacity" 
+                            onClick={() => toggleGoalTimer(g.id)}
+                            title={isRunning ? "Click to stop timer" : "Click to start timer"}
+                          >
+                            <div className="text-sm">{g.text}</div>
+                            <div className="text-xs opacity-70 mt-1">{formatHMS(totalElapsed)}</div>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startEditing(g); }}
+                            className="opacity-60 hover:opacity-100 flex-shrink-0"
+                            title="Edit goal"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <div className="text-xs opacity-70 flex-shrink-0">{name}</div>
+                        </>
                       )}
-                      
-                      <div className="text-xs opacity-70">{name}</div>
                     </div>
                   );
                 })}
@@ -923,12 +1060,13 @@ function VisionPage({
                 const color = getCategoryColor(categories, g.categoryId);
                 const name = getCategoryPathName(categories, g.categoryId);
                 const isEditing = editingGoal === g.id;
+                const totalElapsed = g.totalSeconds || 0;
                 
                 return (
-                  <div key={g.id} className="flex items-center gap-3 p-2 bg-[#0f1117] rounded-2xl border border-[#1f2337]">
+                  <div key={g.id} className="flex items-center gap-2 p-3 bg-[#0f1117] rounded-2xl border border-[#1f2337]">
                     <button 
-                      onClick={() => toggleGoal(g.id)}
-                      className="w-5 h-5 rounded-full hover:opacity-80 transition-opacity" 
+                      onClick={() => toggleGoalCompletion(g.id)}
+                      className="w-5 h-5 rounded-full hover:opacity-80 transition-opacity flex-shrink-0" 
                       style={{ background: color }} 
                       title="Mark incomplete"
                     />
@@ -991,17 +1129,26 @@ function VisionPage({
                         </div>
                       </div>
                     ) : (
-                      <div 
-                        className="flex-1 text-sm cursor-pointer hover:opacity-80 transition-opacity" 
-                        style={{ textDecoration: "line-through", textDecorationThickness: "1px", textDecorationColor: color }}
-                        onClick={() => startEditing(g)}
-                        title="Click to edit"
-                      >
-                        {g.text}
-                      </div>
+                      <>
+                        <div className="flex-1">
+                          <div 
+                            className="text-sm" 
+                            style={{ textDecoration: "line-through", textDecorationThickness: "1px", textDecorationColor: color }}
+                          >
+                            {g.text}
+                          </div>
+                          <div className="text-xs opacity-70 mt-1">{formatHMS(totalElapsed)}</div>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEditing(g); }}
+                          className="opacity-60 hover:opacity-100 flex-shrink-0"
+                          title="Edit goal"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <div className="text-xs opacity-70 flex-shrink-0">{name}</div>
+                      </>
                     )}
-                    
-                    <div className="text-xs opacity-70">{name}</div>
                   </div>
                 );
               })}
@@ -1359,7 +1506,10 @@ export default function TimeTrackerMVP() {
             text: g.text,
             categoryId: g.category_id,
             completed: g.completed,
-            createdAt: new Date(g.created_at).getTime()
+            createdAt: new Date(g.created_at).getTime(),
+            totalSeconds: g.total_seconds || 0,
+            isActive: g.is_active || false,
+            lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
           })));
           
           setVisionPhotos(visionPhotosData.map(v => ({
@@ -1414,7 +1564,10 @@ export default function TimeTrackerMVP() {
               text: g.text,
               categoryId: g.category_id,
               completed: g.completed,
-              createdAt: new Date(g.created_at).getTime()
+              createdAt: new Date(g.created_at).getTime(),
+              totalSeconds: g.total_seconds || 0,
+              isActive: g.is_active || false,
+              lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
             })));
           });
           
@@ -1495,8 +1648,8 @@ export default function TimeTrackerMVP() {
 
   // Direct & rolled-up totals (live)
   const directSeconds = useMemo(
-    () => computeDirectSeconds(sessions, windowStart, windowEnd),
-    [sessions, windowStart, windowEnd, tick]
+    () => computeDirectSeconds(sessions, windowStart, windowEnd, goals),
+    [sessions, windowStart, windowEnd, goals, tick]
   );
   const rolledSeconds = useMemo(
     () => rollupSeconds(categories, directSeconds),
@@ -1506,8 +1659,8 @@ export default function TimeTrackerMVP() {
   // Direct & rolled-up totals for CHART only (freeze while hovering)
   const directSecondsChart = useMemo(() => {
     const endForChart = chartHover && hoverNowRef.current ? hoverNowRef.current : windowEnd;
-    return computeDirectSeconds(sessions, windowStart, endForChart);
-  }, [sessions, windowStart, windowEnd, chartHover, tick]); // Removed 'tick' dependency
+    return computeDirectSeconds(sessions, windowStart, endForChart, goals);
+  }, [sessions, windowStart, windowEnd, goals, chartHover, tick]);
   const rolledSecondsChart = useMemo(
     () => rollupSeconds(categories, directSecondsChart),
     [categories, directSecondsChart]
@@ -1613,13 +1766,70 @@ export default function TimeTrackerMVP() {
     }
   }
 
+  // Helper to stop all active goals under a category
+  async function stopActiveGoalsUnder(categoryId: string) {
+    const childIds = categories.filter(c => c.parentId === categoryId).map(c => c.id);
+    const allRelatedIds = [categoryId, ...childIds];
+    const activeGoalsUnder = goals.filter(g => g.isActive && allRelatedIds.includes(g.categoryId));
+    
+    if (isAuthenticated) {
+      for (const goal of activeGoalsUnder) {
+        const now = Date.now();
+        const sessionSeconds = goal.lastStartTime 
+          ? Math.floor((now - goal.lastStartTime) / 1000) 
+          : 0;
+        const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+        
+        await dataService.updateGoal(goal.id, {
+          is_active: false,
+          total_seconds: newTotal,
+          last_start_time: null
+        });
+      }
+      
+      // Refresh goals if any were stopped
+      if (activeGoalsUnder.length > 0) {
+        const goalsData = await dataService.getGoals();
+        setGoals(() => goalsData.map(g => ({
+          id: g.id,
+          text: g.text,
+          categoryId: g.category_id,
+          completed: g.completed,
+          createdAt: new Date(g.created_at).getTime(),
+          totalSeconds: g.total_seconds || 0,
+          isActive: g.is_active || false,
+          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+        })));
+      }
+    } else {
+      // Local state for unauthenticated users
+      setGoals(prev => prev.map(g => {
+        if (activeGoalsUnder.find(ag => ag.id === g.id)) {
+          const now = Date.now();
+          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+        }
+        return g;
+      }));
+    }
+  }
+
   const toggleCategory = useCallback(async (id: string) => {
     // Store current scroll position
     scrollPositionRef.current = window.scrollY;
     
+    // Check if this category is highlighted due to active children/goals
+    const isHighlighted = isCategoryHighlighted(id);
+    
     if (activeId === id) {
+      // Direct session running on this category - stop it
       await stopRunning();
+    } else if (isHighlighted) {
+      // Category is highlighted due to active child/goal - stop all active items under this category
+      await stopRunning(); // Stop any active session
+      await stopActiveGoalsUnder(id); // Stop all active goals
     } else {
+      // Start new session on this category
       await startCategory(id);
     }
     
@@ -1627,7 +1837,7 @@ export default function TimeTrackerMVP() {
     requestAnimationFrame(() => {
       window.scrollTo(0, scrollPositionRef.current);
     });
-  }, [activeId, sessions]);
+  }, [activeId, sessions, goals, categories]);
 
   async function handleLogin() {
     if (tempName.trim()) {
@@ -1993,6 +2203,24 @@ export default function TimeTrackerMVP() {
     return Math.round(((rolledSeconds[catId] || 0) / grandTotalVisible) * 100);
   }
 
+  // Check if a category should be highlighted based on active state cascading
+  function isCategoryHighlighted(catId: string): boolean {
+    // Direct active session on this category
+    if (activeId === catId) return true;
+    
+    // Check if any child categories are active
+    const hasActiveChild = categories.some(c => c.parentId === catId && activeId === c.id);
+    if (hasActiveChild) return true;
+    
+    // Check if any goals under this category or its children are active
+    const childIds = categories.filter(c => c.parentId === catId).map(c => c.id);
+    const allRelatedIds = [catId, ...childIds];
+    const hasActiveGoal = goals.some(g => g.isActive && allRelatedIds.includes(g.categoryId));
+    if (hasActiveGoal) return true;
+    
+    return false;
+  }
+
   const headerCats = visibleCategories.slice(0, 3);
   const title = currentParentId
     ? `Subcategories • ${categories.find((c) => c.id === currentParentId)?.name ?? ""}`
@@ -2230,9 +2458,9 @@ export default function TimeTrackerMVP() {
               const pct = sharePct(c.id);
               const goal = c.goalPct ?? null;
               const goalText = goal != null ? `Goal of ${goal}%` : "";
-              const running = activeId === c.id;
+              const isHighlighted = isCategoryHighlighted(c.id); // Cascading highlight from children/goals
 
-              const highlight = running ? `${c.color}33` : undefined; // tint active row
+              const highlight = isHighlighted ? `${c.color}33` : undefined; // tint active row
 
               return (
                 <div
