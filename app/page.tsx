@@ -433,7 +433,8 @@ function VisionPage({
   setGoals, 
   setVisionPhotos, 
   addCategory,
-  isAuthenticated 
+  isAuthenticated,
+  stopAllActiveTimers
 }: {
   categories: Category[];
   goals: Goal[];
@@ -442,6 +443,7 @@ function VisionPage({
   setVisionPhotos: (fn: (prev: VisionPhoto[]) => VisionPhoto[]) => void;
   addCategory: (cat: { name: string; goalPct?: number; color: string; parentId: string | null }) => void;
   isAuthenticated: boolean;
+  stopAllActiveTimers: () => Promise<void>;
 }) {
   const [goalText, setGoalText] = useState("");
   const [selCat, setSelCat] = useState<string | "">("");
@@ -553,46 +555,16 @@ function VisionPage({
     const goal = goals.find(g => g.id === id);
     if (!goal || goal.completed) return; // Can't toggle timer on completed goals
     
-    // Stop any other running goals first (just like categories)
-    const runningGoal = goals.find(g => g.isActive && g.id !== id);
+    // Stop ALL active timers first (both sessions and goals)
+    await stopAllActiveTimers();
     
     if (isAuthenticated) {
       try {
-        // Stop any currently running goal
-        if (runningGoal) {
-          const now = Date.now();
-          const sessionSeconds = runningGoal.lastStartTime 
-            ? Math.floor((now - runningGoal.lastStartTime) / 1000) 
-            : 0;
-          const newTotal = (runningGoal.totalSeconds || 0) + sessionSeconds;
-          
-          await dataService.updateGoal(runningGoal.id, {
-            is_active: false,
-            total_seconds: newTotal,
-            last_start_time: null
-          });
-        }
-        
-        if (goal.isActive) {
-          // Stop this timer
-          const now = Date.now();
-          const sessionSeconds = goal.lastStartTime 
-            ? Math.floor((now - goal.lastStartTime) / 1000) 
-            : 0;
-          const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
-          
-          await dataService.updateGoal(id, {
-            is_active: false,
-            total_seconds: newTotal,
-            last_start_time: null
-          });
-        } else {
-          // Start timer on this goal
-          await dataService.updateGoal(id, {
-            is_active: true,
-            last_start_time: new Date().toISOString()
-          });
-        }
+        // Since we already stopped all timers, just start this goal timer
+        await dataService.updateGoal(id, {
+          is_active: true,
+          last_start_time: new Date().toISOString()
+        });
         
         // Manually refresh goals
         const goalsData = await dataService.getGoals();
@@ -611,23 +583,10 @@ function VisionPage({
         alert("Failed to update goal timer. Please try again.");
       }
     } else {
-      // Local state for unauthenticated users
+      // Local state for unauthenticated users - since we already stopped all timers, just start this goal
       setGoals(prev => prev.map(g => {
         if (g.id === id) {
-          if (g.isActive) {
-            // Stop this goal's timer
-            const now = Date.now();
-            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
-            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
-          } else {
-            // Start this goal's timer
-            return { ...g, isActive: true, lastStartTime: Date.now() };
-          }
-        } else if (g.isActive) {
-          // Stop any other running goal
-          const now = Date.now();
-          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
-          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+          return { ...g, isActive: true, lastStartTime: Date.now() };
         }
         return g;
       }));
@@ -1693,7 +1652,7 @@ export default function TimeTrackerMVP() {
 
   // Actions
   async function startCategory(id: string) {
-    await stopRunning();
+    await stopAllActiveTimers();
     
     if (isAuthenticated) {
       try {
@@ -1810,6 +1769,56 @@ export default function TimeTrackerMVP() {
       // Local state for unauthenticated users
       setGoals(prev => prev.map(g => {
         if (activeGoalsUnder.find(ag => ag.id === g.id)) {
+          const now = Date.now();
+          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+        }
+        return g;
+      }));
+    }
+  }
+
+  // Helper to stop ALL active timers (both sessions and goals)
+  async function stopAllActiveTimers() {
+    // Stop any running session
+    await stopRunning();
+    
+    // Stop all active goals
+    const activeGoals = goals.filter(g => g.isActive);
+    
+    if (isAuthenticated) {
+      for (const goal of activeGoals) {
+        const now = Date.now();
+        const sessionSeconds = goal.lastStartTime 
+          ? Math.floor((now - goal.lastStartTime) / 1000) 
+          : 0;
+        const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+        
+        await dataService.updateGoal(goal.id, {
+          is_active: false,
+          total_seconds: newTotal,
+          last_start_time: null
+        });
+      }
+      
+      // Refresh goals if any were stopped
+      if (activeGoals.length > 0) {
+        const goalsData = await dataService.getGoals();
+        setGoals(() => goalsData.map(g => ({
+          id: g.id,
+          text: g.text,
+          categoryId: g.category_id,
+          completed: g.completed,
+          createdAt: new Date(g.created_at).getTime(),
+          totalSeconds: g.total_seconds || 0,
+          isActive: g.is_active || false,
+          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+        })));
+      }
+    } else {
+      // Local state for unauthenticated users
+      setGoals(prev => prev.map(g => {
+        if (g.isActive) {
           const now = Date.now();
           const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
           return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
@@ -2587,6 +2596,7 @@ export default function TimeTrackerMVP() {
         setVisionPhotos={setVisionPhotos}
         addCategory={addCategory}
         isAuthenticated={isAuthenticated}
+        stopAllActiveTimers={stopAllActiveTimers}
       />}
 
       {/* Bottom Nav - Fixed to bottom */}
