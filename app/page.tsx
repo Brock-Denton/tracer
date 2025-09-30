@@ -1457,7 +1457,6 @@ export default function TimeTrackerMVP() {
   const [rangeMenuOpen, setRangeMenuOpen] = useState(false);
   const rangeMenuRef = useRef<boolean>(false);
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
-  const scrollPositionRef = useRef<number>(0); // null = top-level
   const [editMode, setEditMode] = useState(false); // pencil toggle for overlay edit icons
 
   // A ticking value that increments each second to drive live updates.
@@ -1906,9 +1905,6 @@ export default function TimeTrackerMVP() {
   }
 
   const toggleCategory = useCallback(async (id: string) => {
-    // Store current scroll position
-    scrollPositionRef.current = window.scrollY;
-    
     // Check if this category is highlighted due to active children/goals
     const isHighlighted = isCategoryHighlighted(id);
     
@@ -1923,11 +1919,6 @@ export default function TimeTrackerMVP() {
       // Start new session on this category
       await startCategory(id);
     }
-    
-    // Restore scroll position after state update
-    requestAnimationFrame(() => {
-      window.scrollTo(0, scrollPositionRef.current);
-    });
   }, [activeId, sessions, goals, categories]);
 
   async function handleLogin() {
