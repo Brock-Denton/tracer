@@ -2344,7 +2344,6 @@ export default function TimeTrackerMVP() {
       <div className="rounded-2xl p-4 mb-4 bg-[#161925] border border-[#1f2337]">
         <div className="flex flex-wrap items-center gap-3">
           <input
-            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={parentId ? "Subcategory name" : "Category name"}
