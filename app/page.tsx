@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { PieChart, Pie, Cell, Tooltip } from "recharts";
 import { Plus, Check, Pencil, Trash2, ChevronRight } from "lucide-react";
+import { dataService } from "../lib/dataService";
+import { MigrationService } from "../lib/migrationService";
 
 // --- Types ---
 type Category = {
@@ -391,7 +393,8 @@ function VisionPage({
   visionPhotos, 
   setGoals, 
   setVisionPhotos, 
-  addCategory 
+  addCategory,
+  isAuthenticated 
 }: {
   categories: Category[];
   goals: Goal[];
@@ -399,6 +402,7 @@ function VisionPage({
   setGoals: (fn: (prev: Goal[]) => Goal[]) => void;
   setVisionPhotos: (fn: (prev: VisionPhoto[]) => VisionPhoto[]) => void;
   addCategory: (cat: { name: string; goalPct?: number; color: string; parentId: string | null }) => void;
+  isAuthenticated: boolean;
 }) {
   const [goalText, setGoalText] = useState("");
   const [selCat, setSelCat] = useState<string | "">("");
@@ -415,14 +419,38 @@ function VisionPage({
 
   function onUpload(idx: number, file: File) {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = typeof reader.result === "string" ? reader.result : null;
       if (!result) return;
-      setVisionPhotos(prev => prev.map((p, i) => (
-        i === idx
-          ? { ...p, src: result, alt: file.name || p.alt }
-          : p
-      )));
+      
+      if (isAuthenticated) {
+        try {
+          const photo = visionPhotos[idx];
+          if (photo) {
+            await dataService.updateVisionPhoto(photo.id, {
+              src: result,
+              alt: file.name || photo.alt
+            });
+            
+            // Manually refresh vision photos
+            const photosData = await dataService.getVisionPhotos();
+            setVisionPhotos(photosData.map(v => ({
+              id: v.id,
+              src: v.src,
+              alt: v.alt
+            })));
+          }
+        } catch (error) {
+          console.error("Error uploading vision photo:", error);
+          alert("Failed to upload image. Please try again.");
+        }
+      } else {
+        setVisionPhotos(prev => prev.map((p, i) => (
+          i === idx
+            ? { ...p, src: result, alt: file.name || p.alt }
+            : p
+        )));
+      }
     };
     reader.onerror = () => {
       console.error("Failed to read image file");
@@ -447,18 +475,67 @@ function VisionPage({
     if (created) setSelSub(created.id);
   }
 
-  function saveGoal() {
+  async function saveGoal() {
     const text = goalText.trim();
     const target = selSub || selCat;
     if (!text) return;
     if (!target) { alert("Choose where to save this goal."); return; }
-    const g: Goal = { id: uid(), text, categoryId: target, completed: false, createdAt: Date.now() };
-    setGoals(prev => [g, ...prev]);
-    setGoalText("");
+    
+    if (isAuthenticated) {
+      try {
+        await dataService.createGoal({
+          text,
+          category_id: target,
+          completed: false
+        });
+        
+        // Manually refresh goals
+        const goalsData = await dataService.getGoals();
+        setGoals(goalsData.map(g => ({
+          id: g.id,
+          text: g.text,
+          categoryId: g.category_id,
+          completed: g.completed,
+          createdAt: new Date(g.created_at).getTime()
+        })));
+        setGoalText("");
+      } catch (error) {
+        console.error("Error creating goal:", error);
+        alert("Failed to create goal. Please try again.");
+      }
+    } else {
+      const g: Goal = { id: uid(), text, categoryId: target, completed: false, createdAt: Date.now() };
+      setGoals(prev => [g, ...prev]);
+      setGoalText("");
+    }
   }
 
-  function toggleGoal(id: string) {
-    setGoals(prev => prev.map(g => g.id === id ? { ...g, completed: !g.completed } : g));
+  async function toggleGoal(id: string) {
+    if (isAuthenticated) {
+      try {
+        const goal = goals.find(g => g.id === id);
+        if (!goal) return;
+        
+        await dataService.updateGoal(id, {
+          completed: !goal.completed
+        });
+        
+        // Manually refresh goals
+        const goalsData = await dataService.getGoals();
+        setGoals(goalsData.map(g => ({
+          id: g.id,
+          text: g.text,
+          categoryId: g.category_id,
+          completed: g.completed,
+          createdAt: new Date(g.created_at).getTime()
+        })));
+      } catch (error) {
+        console.error("Error toggling goal:", error);
+        alert("Failed to update goal. Please try again.");
+      }
+    } else {
+      setGoals(prev => prev.map(g => g.id === id ? { ...g, completed: !g.completed } : g));
+    }
   }
 
   function updateGoal(id: string, newText: string) {
@@ -484,15 +561,37 @@ function VisionPage({
     }
   }
 
-  function saveEditing() {
+  async function saveEditing() {
     if (editingGoal && editingText.trim()) {
       const targetCategory = editingSub || editingCat;
       if (targetCategory) {
-        setGoals(prev => prev.map(g => 
-          g.id === editingGoal 
-            ? { ...g, text: editingText.trim(), categoryId: targetCategory }
-            : g
-        ));
+        if (isAuthenticated) {
+          try {
+            await dataService.updateGoal(editingGoal, {
+              text: editingText.trim(),
+              category_id: targetCategory
+            });
+            
+            // Manually refresh goals
+            const goalsData = await dataService.getGoals();
+            setGoals(goalsData.map(g => ({
+              id: g.id,
+              text: g.text,
+              categoryId: g.category_id,
+              completed: g.completed,
+              createdAt: new Date(g.created_at).getTime()
+            })));
+          } catch (error) {
+            console.error("Error updating goal:", error);
+            alert("Failed to update goal. Please try again.");
+          }
+        } else {
+          setGoals(prev => prev.map(g => 
+            g.id === editingGoal 
+              ? { ...g, text: editingText.trim(), categoryId: targetCategory }
+              : g
+          ));
+        }
       }
     }
     setEditingGoal(null);
@@ -508,9 +607,28 @@ function VisionPage({
     setEditingSub("");
   }
 
-  function deleteGoal(id: string) {
+  async function deleteGoal(id: string) {
     if (confirm("Are you sure you want to delete this goal?")) {
-      setGoals(prev => prev.filter(g => g.id !== id));
+      if (isAuthenticated) {
+        try {
+          await dataService.deleteGoal(id);
+          
+          // Manually refresh goals
+          const goalsData = await dataService.getGoals();
+          setGoals(goalsData.map(g => ({
+            id: g.id,
+            text: g.text,
+            categoryId: g.category_id,
+            completed: g.completed,
+            createdAt: new Date(g.created_at).getTime()
+          })));
+        } catch (error) {
+          console.error("Error deleting goal:", error);
+          alert("Failed to delete goal. Please try again.");
+        }
+      } else {
+        setGoals(prev => prev.filter(g => g.id !== id));
+      }
     }
   }
 
@@ -519,13 +637,35 @@ function VisionPage({
     setEditingImageText(currentText);
   }
 
-  function saveImageText() {
+  async function saveImageText() {
     if (editingImage !== null) {
-      setVisionPhotos(prev => prev.map((p, i) => 
-        i === editingImage 
-          ? { ...p, alt: editingImageText.trim() }
-          : p
-      ));
+      if (isAuthenticated) {
+        try {
+          const photo = visionPhotos[editingImage];
+          if (photo) {
+            await dataService.updateVisionPhoto(photo.id, {
+              alt: editingImageText.trim()
+            });
+            
+            // Manually refresh vision photos
+            const photosData = await dataService.getVisionPhotos();
+            setVisionPhotos(photosData.map(v => ({
+              id: v.id,
+              src: v.src,
+              alt: v.alt
+            })));
+          }
+        } catch (error) {
+          console.error("Error updating vision photo:", error);
+          alert("Failed to update image text. Please try again.");
+        }
+      } else {
+        setVisionPhotos(prev => prev.map((p, i) => 
+          i === editingImage 
+            ? { ...p, alt: editingImageText.trim() }
+            : p
+        ));
+      }
     }
     setEditingImage(null);
     setEditingImageText("");
@@ -1111,12 +1251,14 @@ export default function TimeTrackerMVP() {
   const [userName, setUserName] = useState<string>("");
   const [authMode, setAuthMode] = useState<"login" | "create">("login");
   const [tempName, setTempName] = useState<string>("");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const [visionPhotos, setVisionPhotos] = useState<VisionPhoto[]>(DEFAULT_VISION);
+  const [visionPhotos, setVisionPhotos] = useState<VisionPhoto[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
 
   const [range, setRange] = useState<Range>("Today"); // default Today (24h)
@@ -1142,38 +1284,138 @@ export default function TimeTrackerMVP() {
     runSelfTests();
   }, []);
 
-  // Load from localStorage (state + prefs)
+  // Initialize Supabase auth and data
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.categories) setCategories(parsed.categories);
-        if (parsed.sessions) setSessions(parsed.sessions);
-        if (parsed.activeId) setActiveId(parsed.activeId);
-        if (Object.prototype.hasOwnProperty.call(parsed, "currentParentId")) setCurrentParentId(parsed.currentParentId);
-        if (parsed.userName) setUserName(parsed.userName);
-        if (Array.isArray(parsed.visionPhotos)) setVisionPhotos(parsed.visionPhotos);
-        if (Array.isArray(parsed.goals)) setGoals(parsed.goals);
-        if (parsed.authMode) setAuthMode(parsed.authMode);
+    const initializeApp = async () => {
+      try {
+        // Check current user
+        const { user } = await dataService.getCurrentUser();
+        
+        if (user) {
+          setIsAuthenticated(true);
+          setUserName(user.username || user.display_name || "");
+          
+          // Load data from Supabase
+          const [categoriesData, sessionsData, goalsData, visionPhotosData] = await Promise.all([
+            dataService.getCategories(),
+            dataService.getSessions(),
+            dataService.getGoals(),
+            dataService.getVisionPhotos()
+          ]);
+          
+          // Convert Supabase data to app format
+          setCategories(categoriesData.map(c => ({
+            id: c.id,
+            name: c.name,
+            color: c.color,
+            goalPct: c.goal_pct || undefined,
+            icon: c.icon || undefined,
+            parentId: c.parent_id || undefined
+          })));
+          
+          setSessions(sessionsData.map(s => ({
+            id: s.id,
+            categoryId: s.category_id,
+            start: new Date(s.start_time).getTime(),
+            end: s.end_time ? new Date(s.end_time).getTime() : undefined
+          })));
+          
+          setGoals(goalsData.map(g => ({
+            id: g.id,
+            text: g.text,
+            categoryId: g.category_id,
+            completed: g.completed,
+            createdAt: new Date(g.created_at).getTime()
+          })));
+          
+          setVisionPhotos(visionPhotosData.map(v => ({
+            id: v.id,
+            src: v.src,
+            alt: v.alt
+          })));
+          
+          // Set up real-time subscriptions
+          dataService.subscribeToCategories((newCategories) => {
+            setCategories(newCategories.map(c => ({
+              id: c.id,
+              name: c.name,
+              color: c.color,
+              goalPct: c.goal_pct || undefined,
+              icon: c.icon || undefined,
+              parentId: c.parent_id || undefined
+            })));
+          });
+          
+          dataService.subscribeToSessions((newSessions) => {
+            setSessions(newSessions.map(s => ({
+              id: s.id,
+              categoryId: s.category_id,
+              start: new Date(s.start_time).getTime(),
+              end: s.end_time ? new Date(s.end_time).getTime() : undefined
+            })));
+          });
+          
+          dataService.subscribeToGoals((newGoals) => {
+            setGoals(newGoals.map(g => ({
+              id: g.id,
+              text: g.text,
+              categoryId: g.category_id,
+              completed: g.completed,
+              createdAt: new Date(g.created_at).getTime()
+            })));
+          });
+          
+          dataService.subscribeToVisionPhotos((newPhotos) => {
+            setVisionPhotos(newPhotos.map(v => ({
+              id: v.id,
+              src: v.src,
+              alt: v.alt
+            })));
+          });
+          
+        } else {
+          // Check for localStorage data to migrate
+          if (MigrationService.hasLocalStorageData()) {
+            const hasSupabaseData = await MigrationService.hasSupabaseData();
+            if (!hasSupabaseData) {
+              // Show migration option
+              console.log("Found localStorage data to migrate");
+            }
+          }
+          
+          // Load default data for unauthenticated users
+          setCategories(DEFAULT_CATEGORIES);
+          setVisionPhotos(DEFAULT_VISION);
+        }
+        
+        // Load preferences from localStorage
+        const prefsRaw = localStorage.getItem(PREFS_KEY);
+        if (prefsRaw) {
+          const p = JSON.parse(prefsRaw);
+          if (p.preferredRange) setRange(p.preferredRange as Range);
+        }
+        
+      } catch (error) {
+        console.error("Error initializing app:", error);
+        // Fallback to default data
+        setCategories(DEFAULT_CATEGORIES);
+        setVisionPhotos(DEFAULT_VISION);
+      } finally {
+        setIsLoading(false);
       }
-      const prefsRaw = localStorage.getItem(PREFS_KEY);
-      if (prefsRaw) {
-        const p = JSON.parse(prefsRaw);
-        if (p.preferredRange) setRange(p.preferredRange as Range);
-      }
-    } catch {}
+    };
+    
+    initializeApp();
   }, []);
 
-  // Persist to localStorage (state + prefs)
+  // Persist preferences to localStorage (only for non-sensitive data)
   useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ categories, sessions, activeId, currentParentId, userName, visionPhotos, goals, authMode })
+      JSON.stringify({ currentParentId, authMode })
     );
-  }, [categories, sessions, activeId, currentParentId, userName, visionPhotos, goals, authMode]);
+  }, [currentParentId, authMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1239,59 +1481,190 @@ export default function TimeTrackerMVP() {
   const runningTotalSeconds = runningSession ? (directSeconds[runningSession.categoryId] ?? 0) : 0;
 
   // Actions
-  function startCategory(id: string) {
-    stopRunning();
-    const newS: Session = { id: uid(), categoryId: id, start: Date.now() };
-    setSessions((prev) => [...prev, newS]);
-    setActiveId(id);
-  }
-
-  function stopRunning() {
-    setSessions((prev) => {
-      const next = [...prev];
-      for (let i = next.length - 1; i >= 0; i--) {
-        if (next[i].end == null) {
-          next[i] = { ...next[i], end: Date.now() };
-          break;
+  async function startCategory(id: string) {
+    await stopRunning();
+    
+    if (isAuthenticated) {
+      try {
+        const newSession = await dataService.createSession({
+          category_id: id,
+          start_time: new Date().toISOString(),
+          end_time: null,
+          duration_seconds: null
+        });
+        
+        if (newSession) {
+          setActiveId(id);
+          // Manually refresh sessions to ensure UI updates
+          const sessionsData = await dataService.getSessions();
+          setSessions(sessionsData.map(s => ({
+            id: s.id,
+            categoryId: s.category_id,
+            start: new Date(s.start_time).getTime(),
+            end: s.end_time ? new Date(s.end_time).getTime() : undefined
+          })));
         }
+      } catch (error) {
+        console.error("Error starting session:", error);
+        alert("Failed to start session. Please try again.");
       }
-      return next;
-    });
-    setActiveId(null);
+    } else {
+      // Fallback for unauthenticated users
+      const newS: Session = { id: uid(), categoryId: id, start: Date.now() };
+      setSessions((prev) => [...prev, newS]);
+      setActiveId(id);
+    }
   }
 
-  const toggleCategory = useCallback((id: string) => {
+  async function stopRunning() {
+    const runningSession = sessions.find((s) => !s.end);
+    if (runningSession) {
+      if (isAuthenticated) {
+        try {
+          const endTime = new Date().toISOString();
+          const durationSeconds = Math.round((Date.now() - runningSession.start) / 1000);
+          
+          await dataService.updateSession(runningSession.id, {
+            end_time: endTime,
+            duration_seconds: durationSeconds
+          });
+          
+          setActiveId(null);
+          
+          // Manually refresh sessions to ensure UI updates
+          const sessionsData = await dataService.getSessions();
+          setSessions(sessionsData.map(s => ({
+            id: s.id,
+            categoryId: s.category_id,
+            start: new Date(s.start_time).getTime(),
+            end: s.end_time ? new Date(s.end_time).getTime() : undefined
+          })));
+        } catch (error) {
+          console.error("Error stopping session:", error);
+          alert("Failed to stop session. Please try again.");
+        }
+      } else {
+        // Fallback for unauthenticated users
+        setSessions((prev) => {
+          const next = [...prev];
+          for (let i = next.length - 1; i >= 0; i--) {
+            if (next[i].end == null) {
+              next[i] = { ...next[i], end: Date.now() };
+              break;
+            }
+          }
+          return next;
+        });
+        setActiveId(null);
+      }
+    }
+  }
+
+  const toggleCategory = useCallback(async (id: string) => {
     // Store current scroll position
     scrollPositionRef.current = window.scrollY;
     
-    if (activeId === id) stopRunning();
-    else startCategory(id);
+    if (activeId === id) {
+      await stopRunning();
+    } else {
+      await startCategory(id);
+    }
     
     // Restore scroll position after state update
     requestAnimationFrame(() => {
       window.scrollTo(0, scrollPositionRef.current);
     });
-  }, [activeId]);
+  }, [activeId, sessions]);
 
-  function handleLogin() {
+  async function handleLogin() {
     if (tempName.trim()) {
-      setUserName(tempName.trim());
-      setTempName("");
+      try {
+        // Sign in with username
+        const { user, error } = await dataService.signInWithUsername(tempName.trim());
+        
+        if (error) {
+          alert("Failed to login: " + error.message);
+          return;
+        }
+        
+        if (user) {
+          setUserName(user.username);
+          setIsAuthenticated(true);
+          setTempName("");
+          
+          // Reload to load user data
+          window.location.reload();
+        }
+      } catch (error) {
+        console.error("Login error:", error);
+        alert("Failed to login. Please try again.");
+      }
     }
   }
 
-  function handleCreateUser() {
+  async function handleCreateUser() {
     if (tempName.trim()) {
-      setUserName(tempName.trim());
-      setTempName("");
-      // Could add additional setup for new users here
+      try {
+        // Create user with username (will auto-create if doesn't exist)
+        const { user, error } = await dataService.signInWithUsername(tempName.trim());
+        
+        if (error) {
+          alert("Failed to create account: " + error.message);
+          return;
+        }
+        
+        if (user) {
+          setUserName(user.username);
+          setIsAuthenticated(true);
+          setTempName("");
+          
+          // Create default categories for new user
+          const categoriesData = await dataService.getCategories();
+          if (categoriesData.length === 0) {
+            for (const category of DEFAULT_CATEGORIES) {
+              await dataService.createCategory({
+                name: category.name,
+                color: category.color,
+                goal_pct: category.goalPct || null,
+                icon: category.icon || null,
+                parent_id: null
+              });
+            }
+            
+            // Create default vision photos
+            for (const photo of DEFAULT_VISION) {
+              await dataService.createVisionPhoto({
+                src: photo.src,
+                alt: photo.alt
+              });
+            }
+          }
+          
+          // Reload data from Supabase
+          window.location.reload();
+        }
+      } catch (error) {
+        console.error("Create user error:", error);
+        alert("Failed to create account. Please try again.");
+      }
     }
   }
 
-  function handleLogout() {
-    setUserName("");
-    setTempName("");
-    setAuthMode("login");
+  async function handleLogout() {
+    try {
+      await dataService.signOut();
+      setUserName("");
+      setTempName("");
+      setIsAuthenticated(false);
+      setAuthMode("login");
+      setCategories([]);
+      setSessions([]);
+      setGoals([]);
+      setVisionPhotos([]);
+      setActiveId(null);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   }
 
   function selectRange(newRange: Range) {
@@ -1316,7 +1689,7 @@ export default function TimeTrackerMVP() {
   function openAdder() {
     setAdderOpen(true);
   }
-  function addCategory(cat: { name: string; goalPct?: number; color: string; parentId: string | null }) {
+  async function addCategory(cat: { name: string; goalPct?: number; color: string; parentId: string | null }) {
     // Validate goal caps: root total <= 100, child totals <= 100
     if (cat.parentId == null) {
       const sum = computeRootGoalSum(categories, { goal: cat.goalPct ?? 0 });
@@ -1344,8 +1717,32 @@ export default function TimeTrackerMVP() {
       }
     }
     
-    const newCat: Category = { id: uid(), name: cat.name, color: finalColor, goalPct: cat.goalPct, icon: "🕒", parentId: cat.parentId };
-    setCategories((prev) => [...prev, newCat]);
+    try {
+      const newCategory = await dataService.createCategory({
+        name: cat.name,
+        color: finalColor,
+        goal_pct: cat.goalPct || null,
+        icon: "🕒",
+        parent_id: cat.parentId
+      });
+      
+      if (newCategory) {
+        console.log("Category created successfully:", newCategory);
+        // Manually refresh categories to ensure UI updates
+        const categoriesData = await dataService.getCategories();
+        setCategories(categoriesData.map(c => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          goalPct: c.goal_pct || undefined,
+          icon: c.icon || undefined,
+          parentId: c.parent_id || undefined
+        })));
+      }
+    } catch (error) {
+      console.error("Error creating category:", error);
+      alert("Failed to create category. Please try again.");
+    }
   }
 
   function exportCSV() {
@@ -1368,14 +1765,59 @@ export default function TimeTrackerMVP() {
     URL.revokeObjectURL(url);
   }
 
-  function resetAll() {
+  async function resetAll() {
     if (!window.confirm("Reset all data?")) return;
-    setCategories(DEFAULT_CATEGORIES);
-    setSessions([]);
-    setActiveId(null);
-    setCurrentParentId(null);
-    setVisionPhotos(DEFAULT_VISION);
-    setGoals([]);
+    
+    if (isAuthenticated) {
+      try {
+        // Delete all user data from Supabase
+        const [categoriesData, sessionsData, goalsData, visionPhotosData] = await Promise.all([
+          dataService.getCategories(),
+          dataService.getSessions(),
+          dataService.getGoals(),
+          dataService.getVisionPhotos()
+        ]);
+        
+        // Delete all items
+        await Promise.all([
+          ...categoriesData.map(c => dataService.deleteCategory(c.id)),
+          ...sessionsData.map(s => dataService.deleteSession(s.id)),
+          ...goalsData.map(g => dataService.deleteGoal(g.id)),
+          ...visionPhotosData.map(v => dataService.deleteVisionPhoto(v.id))
+        ]);
+        
+        // Create default data
+        for (const category of DEFAULT_CATEGORIES) {
+          await dataService.createCategory({
+            name: category.name,
+            color: category.color,
+            goal_pct: category.goalPct || null,
+            icon: category.icon || null,
+            parent_id: null
+          });
+        }
+        
+        for (const photo of DEFAULT_VISION) {
+          await dataService.createVisionPhoto({
+            src: photo.src,
+            alt: photo.alt
+          });
+        }
+        
+        // Reload to show fresh data
+        window.location.reload();
+      } catch (error) {
+        console.error("Error resetting data:", error);
+        alert("Failed to reset data. Please try again.");
+      }
+    } else {
+      setCategories(DEFAULT_CATEGORIES);
+      setSessions([]);
+      setActiveId(null);
+      setCurrentParentId(null);
+      setVisionPhotos(DEFAULT_VISION);
+      setGoals([]);
+    }
   }
 
   // Editing state
@@ -1394,7 +1836,7 @@ export default function TimeTrackerMVP() {
     setEditIcon(cat.icon ?? "🕒");
   }
 
-  function saveEditor() {
+  async function saveEditor() {
     if (!editingId) return;
     const cat = categories.find((c) => c.id === editingId);
     if (!cat) return;
@@ -1417,18 +1859,77 @@ export default function TimeTrackerMVP() {
       }
     }
 
-    setCategories((prev) => prev.map((c) => (c.id === editingId ? { ...c, name, goalPct: goal || undefined, color: editColor, icon: editIcon } : c)));
+    if (isAuthenticated) {
+      try {
+        await dataService.updateCategory(editingId, {
+          name,
+          goal_pct: goal || null,
+          color: editColor,
+          icon: editIcon
+        });
+        
+        // Manually refresh categories
+        const categoriesData = await dataService.getCategories();
+        setCategories(categoriesData.map(c => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          goalPct: c.goal_pct || undefined,
+          icon: c.icon || undefined,
+          parentId: c.parent_id || undefined
+        })));
+      } catch (error) {
+        console.error("Error updating category:", error);
+        alert("Failed to update category. Please try again.");
+      }
+    } else {
+      setCategories((prev) => prev.map((c) => (c.id === editingId ? { ...c, name, goalPct: goal || undefined, color: editColor, icon: editIcon } : c)));
+    }
+    
     setEditingId(null);
   }
 
-  function deleteCategory(id: string) {
+  async function deleteCategory(id: string) {
     if (!isLeaf(categories, id)) {
       alert("Delete children first before deleting this category.");
       return;
     }
     if (!confirm("Delete this subcategory and its sessions?")) return;
-    setCategories((prev) => prev.filter((c) => c.id !== id));
-    setSessions((prev) => prev.filter((s) => s.categoryId !== id));
+    
+    if (isAuthenticated) {
+      try {
+        await dataService.deleteCategory(id);
+        
+        // Manually refresh categories and sessions
+        const [categoriesData, sessionsData] = await Promise.all([
+          dataService.getCategories(),
+          dataService.getSessions()
+        ]);
+        
+        setCategories(categoriesData.map(c => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          goalPct: c.goal_pct || undefined,
+          icon: c.icon || undefined,
+          parentId: c.parent_id || undefined
+        })));
+        
+        setSessions(sessionsData.map(s => ({
+          id: s.id,
+          categoryId: s.category_id,
+          start: new Date(s.start_time).getTime(),
+          end: s.end_time ? new Date(s.end_time).getTime() : undefined
+        })));
+      } catch (error) {
+        console.error("Error deleting category:", error);
+        alert("Failed to delete category. Please try again.");
+      }
+    } else {
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      setSessions((prev) => prev.filter((s) => s.categoryId !== id));
+    }
+    
     if (activeId === id) setActiveId(null);
     setEditingId(null);
   }
@@ -1445,7 +1946,7 @@ export default function TimeTrackerMVP() {
     : "Categories";
 
   const todayStr = useMemo(() => new Date().toLocaleDateString("en-US"), [tick]);
-  const loggedIn = userName.trim().length > 0;
+  const loggedIn = isAuthenticated;
 
   // ---- Inline child components ----
   function AddForm({ parentId, parentColor, onSave, onClose, categories }: {
@@ -1751,6 +2252,17 @@ export default function TimeTrackerMVP() {
   // Icon options for editor
   const ICONS = ["🕒","📚","💼","🏃","🧘","🎮","🎵","🍽️","🛠️","🌱","🧑‍🍳","🧹","🛌","🚗","📈","🎯","👨‍👩‍👧","🐶","✈️","💻"];
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#11131a] text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-lg">Loading...</div>
+          <div className="text-sm opacity-70 mt-2">Setting up your time tracker</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#11131a] text-white flex flex-col">
       {page === "Home" && <HomePage 
@@ -1775,6 +2287,7 @@ export default function TimeTrackerMVP() {
         setGoals={setGoals}
         setVisionPhotos={setVisionPhotos}
         addCategory={addCategory}
+        isAuthenticated={isAuthenticated}
       />}
 
       {/* Bottom Nav */}
