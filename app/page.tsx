@@ -1476,6 +1476,22 @@ export default function TimeTrackerMVP() {
     runSelfTests();
   }, []);
 
+  // Restore activeId when sessions or goals change (for app reload scenarios)
+  useEffect(() => {
+    if (!isAuthenticated) return; // Only for authenticated users
+    
+    const runningSession = sessions.find(s => !s.end);
+    const activeGoal = goals.find(g => g.isActive);
+    
+    if (runningSession && activeId !== runningSession.categoryId) {
+      setActiveId(runningSession.categoryId);
+    } else if (activeGoal && activeId !== activeGoal.categoryId) {
+      setActiveId(activeGoal.categoryId);
+    } else if (!runningSession && !activeGoal && activeId !== null) {
+      setActiveId(null);
+    }
+  }, [sessions, goals, isAuthenticated, activeId]);
+
   // Initialize Supabase auth and data
   useEffect(() => {
     const initializeApp = async () => {
@@ -1505,14 +1521,15 @@ export default function TimeTrackerMVP() {
             parentId: c.parent_id || undefined
           })));
           
-          setSessions(sessionsData.map(s => ({
+          const sessionsFormatted = sessionsData.map(s => ({
             id: s.id,
             categoryId: s.category_id,
             start: new Date(s.start_time).getTime(),
             end: s.end_time ? new Date(s.end_time).getTime() : undefined
-          })));
+          }));
+          setSessions(sessionsFormatted);
           
-          setGoals(() => goalsData.map(g => ({
+          const goalsFormatted = goalsData.map(g => ({
             id: g.id,
             text: g.text,
             categoryId: g.category_id,
@@ -1521,7 +1538,20 @@ export default function TimeTrackerMVP() {
             totalSeconds: g.total_seconds || 0,
             isActive: g.is_active || false,
             lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
-          })));
+          }));
+          setGoals(goalsFormatted);
+          
+          // Restore activeId based on running sessions or active goals
+          const runningSession = sessionsFormatted.find(s => !s.end);
+          const activeGoal = goalsFormatted.find(g => g.isActive);
+          
+          if (runningSession) {
+            setActiveId(runningSession.categoryId);
+          } else if (activeGoal) {
+            setActiveId(activeGoal.categoryId);
+          } else {
+            setActiveId(null);
+          }
           
           setVisionPhotos(visionPhotosData.map(v => ({
             id: v.id,
