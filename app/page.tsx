@@ -555,41 +555,88 @@ function VisionPage({
     const goal = goals.find(g => g.id === id);
     if (!goal || goal.completed) return; // Can't toggle timer on completed goals
     
-    // Stop ALL active timers first (both sessions and goals)
-    await stopAllActiveTimers();
-    
-    if (isAuthenticated) {
-      try {
-        // Since we already stopped all timers, just start this goal timer
-        await dataService.updateGoal(id, {
-          is_active: true,
-          last_start_time: new Date().toISOString()
-        });
-        
-        // Manually refresh goals
-        const goalsData = await dataService.getGoals();
-        setGoals(() => goalsData.map(g => ({
-          id: g.id,
-          text: g.text,
-          categoryId: g.category_id,
-          completed: g.completed,
-          createdAt: new Date(g.created_at).getTime(),
-          totalSeconds: g.total_seconds || 0,
-          isActive: g.is_active || false,
-          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
-        })));
-      } catch (error) {
-        console.error("Error toggling goal timer:", error);
-        alert("Failed to update goal timer. Please try again.");
+    if (goal.isActive) {
+      // Goal is currently active - stop it
+      if (isAuthenticated) {
+        try {
+          const now = Date.now();
+          const sessionSeconds = goal.lastStartTime 
+            ? Math.floor((now - goal.lastStartTime) / 1000) 
+            : 0;
+          const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+          
+          await dataService.updateGoal(id, {
+            is_active: false,
+            total_seconds: newTotal,
+            last_start_time: null
+          });
+        } catch (error) {
+          console.error("Error stopping goal timer:", error);
+          alert("Failed to stop goal timer. Please try again.");
+          return;
+        }
+      } else {
+        // Local state for unauthenticated users
+        setGoals(prev => prev.map(g => {
+          if (g.id === id) {
+            const now = Date.now();
+            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+          }
+          return g;
+        }));
       }
     } else {
-      // Local state for unauthenticated users - since we already stopped all timers, just start this goal
-      setGoals(prev => prev.map(g => {
-        if (g.id === id) {
-          return { ...g, isActive: true, lastStartTime: Date.now() };
+      // Goal is not active - stop all other timers and start this one
+      await stopAllActiveTimers();
+      
+      if (isAuthenticated) {
+        try {
+          await dataService.updateGoal(id, {
+            is_active: true,
+            last_start_time: new Date().toISOString()
+          });
+        
+          // Manually refresh goals
+          const goalsData = await dataService.getGoals();
+          setGoals(() => goalsData.map(g => ({
+            id: g.id,
+            text: g.text,
+            categoryId: g.category_id,
+            completed: g.completed,
+            createdAt: new Date(g.created_at).getTime(),
+            totalSeconds: g.total_seconds || 0,
+            isActive: g.is_active || false,
+            lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+          })));
+        } catch (error) {
+          console.error("Error starting goal timer:", error);
+          alert("Failed to start goal timer. Please try again.");
         }
-        return g;
-      }));
+      } else {
+        // Local state for unauthenticated users - since we already stopped all timers, just start this goal
+        setGoals(prev => prev.map(g => {
+          if (g.id === id) {
+            return { ...g, isActive: true, lastStartTime: Date.now() };
+          }
+          return g;
+        }));
+      }
+    }
+    
+    // Refresh goals for both authenticated and unauthenticated users
+    if (isAuthenticated) {
+      const goalsData = await dataService.getGoals();
+      setGoals(() => goalsData.map(g => ({
+        id: g.id,
+        text: g.text,
+        categoryId: g.category_id,
+        completed: g.completed,
+        createdAt: new Date(g.created_at).getTime(),
+        totalSeconds: g.total_seconds || 0,
+        isActive: g.is_active || false,
+        lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+      })));
     }
   }
 
