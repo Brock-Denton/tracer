@@ -682,9 +682,9 @@ function VisionPage({
   return (
     <div className="px-5 mt-6 flex-1">
       <div className="max-w-3xl mx-auto space-y-5">
-        {/* Top grid of photos - first 2 hidden, second 2 visible */}
+        {/* Top grid of photos - only show first 4 photos, hide first 2 */}
         <div className="grid grid-cols-2 gap-4">
-          {visionPhotos.map((p, idx) => (
+          {visionPhotos.slice(0, 4).map((p, idx) => (
             <div key={p.id} className={`relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden ${idx < 2 ? 'hidden' : ''}`}>
               <div className="aspect-square overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
