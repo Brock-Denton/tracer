@@ -75,6 +75,11 @@ function formatHMS(totalSeconds: number) {
   return parts.join(" ");
 }
 
+function truncateText(text: string, maxLength: number = 18): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, 16) + "..";
+}
+
 function startOfDay(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
@@ -1191,7 +1196,7 @@ function TimerDisplay({
   if (runningSession) {
     return (
       <>
-        <div className="text-lg font-semibold mt-1">{runningName}</div>
+        <div className="text-lg font-semibold mt-1">{truncateText(runningName)}</div>
         <div className="text-sm mt-1">{formatHMS(displayTime)}</div>
       </>
     );
@@ -2307,11 +2312,11 @@ export default function TimeTrackerMVP() {
     const hasMeasurement = chartSize.width > 0 && chartSize.height > 0;
     const baseSize = 200;
     const pieSize = hasMeasurement
-      ? Math.min(chartSize.width, chartSize.height) * 0.95
+      ? Math.min(chartSize.width, chartSize.height) * 0.9
       : baseSize;
     const radiusScale = pieSize / baseSize;
-    const innerRadius = 70 * radiusScale;
-    const outerRadius = 100 * radiusScale;
+    const innerRadius = 75 * radiusScale;
+    const outerRadius = 95 * radiusScale;
 
     return (
       <>
@@ -2335,25 +2340,9 @@ export default function TimeTrackerMVP() {
         {/* Dial and Range selector */}
         <div className="px-5 mt-4">
           <div className="bg-[#161925] rounded-2xl p-5 shadow-lg relative overflow-visible">
-            {/* Range buttons */}
-            <div className="text-center -mt-6 mb-2 select-none relative z-10">
-              <div className="flex justify-center gap-3 mt-2 text-[13px] flex-wrap">
-                {(["Today", "Week", "Month", "Year", "All"] as Range[]).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setRange(r)}
-                    className={`px-3 py-1 rounded-full transition ${
-                      r === range ? "bg-white text-black" : "bg-[#23283f] text-white/90 hover:bg-[#293050]"
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
             <div
                  ref={chartRef}
-                 className="h-56 flex items-center justify-center px-4"
+                 className="h-64 flex items-center justify-center"
                  onMouseEnter={() => { setChartHover(true); hoverNowRef.current = Date.now(); }}
                  onMouseLeave={() => { setChartHover(false); hoverNowRef.current = null; }}
             >
@@ -2375,6 +2364,7 @@ export default function TimeTrackerMVP() {
                   dataKey="value"
                   paddingAngle={2}
                   isAnimationActive={false}
+                  cornerRadius={3}
                 >
                   {chartData.map((entry, index) => (
                     <Cell key={`slice-${index}`} fill={entry.color} />
@@ -2393,12 +2383,40 @@ export default function TimeTrackerMVP() {
                 <div className="text-xs opacity-70 mb-1">{todayStr}</div>
                 {runningSession ? (
                   <>
-                    <div className="text-lg font-semibold mt-1">{runningName}</div>
+                    <div className="text-lg font-semibold mt-1">{truncateText(runningName)}</div>
                     <div className="text-sm mt-1">{formatHMS(runningTotalSeconds)}</div>
                   </>
                 ) : (
                   <>
-                    <div className="text-[13px] opacity-80 mt-1">{range}</div>
+                    {/* Clickable range selector */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setRangeMenuOpen(!rangeMenuOpen)}
+                        className="text-[13px] opacity-80 mt-1 hover:opacity-100 transition-opacity pointer-events-auto px-2 py-1 rounded-lg hover:bg-white/10"
+                      >
+                        {range} ▼
+                      </button>
+                      
+                      {/* Range dropdown menu - positioned inside the dial */}
+                      {rangeMenuOpen && (
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 bg-[#161925] border border-[#1f2337] rounded-xl shadow-xl z-50 min-w-[120px] pointer-events-auto">
+                          {(["Today", "Week", "Month", "Year", "All"] as Range[]).map((r) => (
+                            <button
+                              key={r}
+                              onClick={() => {
+                                setRange(r);
+                                setRangeMenuOpen(false);
+                              }}
+                              className={`w-full px-4 py-2 text-left text-sm transition-colors first:rounded-t-xl last:rounded-b-xl hover:bg-[#1a1d2e] ${
+                                r === range ? "bg-blue-600/20 text-blue-400" : "text-white"
+                              }`}
+                            >
+                              {r}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
                 <div className="text-center text-sm opacity-80 mt-2">
@@ -2452,7 +2470,7 @@ export default function TimeTrackerMVP() {
             />
           )}
 
-        <div className="space-y-3" style={{ scrollBehavior: 'auto' }}>
+        <div className="space-y-3">
           {visibleCategories.map((c) => {
               const seconds = rolledSeconds[c.id] || 0;
               const pct = sharePct(c.id);
