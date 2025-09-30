@@ -27,7 +27,16 @@ type Range = "Today" | "Week" | "Month" | "Year" | "All";
 type Page = "Time" | "Home" | "Vision";
 
 type VisionPhoto = { id: string; src: string; alt: string };
-type Goal = { id: string; text: string; categoryId: string; completed?: boolean; createdAt: number };
+type Goal = { 
+  id: string; 
+  text: string; 
+  categoryId: string; 
+  completed?: boolean; 
+  createdAt: number;
+  totalSeconds?: number;
+  isActive?: boolean;
+  lastStartTime?: number;
+};
 
 // --- Helpers ---
 const uid = () => Math.random().toString(36).slice(2);
@@ -815,13 +824,16 @@ function VisionPage({
                   const name = getCategoryPathName(categories, g.categoryId);
                   const isEditing = editingGoal === g.id;
                   
+                  const isRunning = g.isActive && !g.completed;
+                  const elapsedSeconds = g.totalSeconds || 0;
+                  
                   return (
                     <div key={g.id} className="flex items-center gap-3 p-2 bg-[#0b0e15] rounded-xl border border-[#1f2337]">
                       <button 
                         onClick={()=>toggleGoal(g.id)} 
-                        className="w-5 h-5 rounded-full border hover:opacity-80 transition-opacity" 
-                        style={{ borderColor: color }} 
-                        title="Mark complete" 
+                        className={`w-5 h-5 rounded-full border hover:opacity-80 transition-opacity ${g.completed ? '' : 'hover:bg-opacity-20'}`}
+                        style={{ borderColor: color, background: g.completed ? color : 'transparent' }} 
+                        title={g.completed ? "Mark incomplete" : "Mark complete"} 
                       />
                       
                       {isEditing ? (
@@ -2065,13 +2077,13 @@ export default function TimeTrackerMVP() {
   function TimePage() {
     const [chartRef, chartSize] = useElementSize<HTMLDivElement>();
     const hasMeasurement = chartSize.width > 0 && chartSize.height > 0;
-    const baseSize = 220;
+    const baseSize = 200;
     const pieSize = hasMeasurement
-      ? Math.min(chartSize.width, chartSize.height)
+      ? Math.min(chartSize.width, chartSize.height) * 0.95
       : baseSize;
     const radiusScale = pieSize / baseSize;
-    const innerRadius = 80 * radiusScale;
-    const outerRadius = 110 * radiusScale;
+    const innerRadius = 70 * radiusScale;
+    const outerRadius = 100 * radiusScale;
 
     return (
       <>
@@ -2113,7 +2125,7 @@ export default function TimeTrackerMVP() {
             </div>
             <div
                  ref={chartRef}
-                 className="h-56 flex items-center justify-center"
+                 className="h-56 flex items-center justify-center px-4"
                  onMouseEnter={() => { setChartHover(true); hoverNowRef.current = Date.now(); }}
                  onMouseLeave={() => { setChartHover(false); hoverNowRef.current = null; }}
             >
