@@ -434,7 +434,7 @@ function VisionPage({
             
             // Manually refresh vision photos
             const photosData = await dataService.getVisionPhotos();
-            setVisionPhotos(photosData.map(v => ({
+            setVisionPhotos(() => photosData.map(v => ({
               id: v.id,
               src: v.src,
               alt: v.alt
@@ -491,7 +491,7 @@ function VisionPage({
         
         // Manually refresh goals
         const goalsData = await dataService.getGoals();
-        setGoals(goalsData.map(g => ({
+        setGoals(() => goalsData.map(g => ({
           id: g.id,
           text: g.text,
           categoryId: g.category_id,
@@ -522,7 +522,7 @@ function VisionPage({
         
         // Manually refresh goals
         const goalsData = await dataService.getGoals();
-        setGoals(goalsData.map(g => ({
+        setGoals(() => goalsData.map(g => ({
           id: g.id,
           text: g.text,
           categoryId: g.category_id,
@@ -574,7 +574,7 @@ function VisionPage({
             
             // Manually refresh goals
             const goalsData = await dataService.getGoals();
-            setGoals(goalsData.map(g => ({
+            setGoals(() => goalsData.map(g => ({
               id: g.id,
               text: g.text,
               categoryId: g.category_id,
@@ -615,7 +615,7 @@ function VisionPage({
           
           // Manually refresh goals
           const goalsData = await dataService.getGoals();
-          setGoals(goalsData.map(g => ({
+          setGoals(() => goalsData.map(g => ({
             id: g.id,
             text: g.text,
             categoryId: g.category_id,
@@ -649,7 +649,7 @@ function VisionPage({
             
             // Manually refresh vision photos
             const photosData = await dataService.getVisionPhotos();
-            setVisionPhotos(photosData.map(v => ({
+            setVisionPhotos(() => photosData.map(v => ({
               id: v.id,
               src: v.src,
               alt: v.alt
@@ -682,10 +682,10 @@ function VisionPage({
   return (
     <div className="px-5 mt-6 flex-1">
       <div className="max-w-3xl mx-auto space-y-5">
-        {/* Top grid of photos */}
+        {/* Top grid of photos - first 2 hidden, second 2 visible */}
         <div className="grid grid-cols-2 gap-4">
           {visionPhotos.map((p, idx) => (
-            <div key={p.id} className="relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden">
+            <div key={p.id} className={`relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden ${idx < 2 ? 'hidden' : ''}`}>
               <div className="aspect-square overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.src} alt={p.alt} className="w-full h-full object-cover" />
@@ -1320,7 +1320,7 @@ export default function TimeTrackerMVP() {
             end: s.end_time ? new Date(s.end_time).getTime() : undefined
           })));
           
-          setGoals(goalsData.map(g => ({
+          setGoals(() => goalsData.map(g => ({
             id: g.id,
             text: g.text,
             categoryId: g.category_id,
@@ -1333,6 +1333,23 @@ export default function TimeTrackerMVP() {
             src: v.src,
             alt: v.alt
           })));
+          
+          // Initialize default vision photos if none exist
+          if (visionPhotosData.length === 0) {
+            for (const photo of DEFAULT_VISION) {
+              await dataService.createVisionPhoto({
+                src: photo.src,
+                alt: photo.alt
+              });
+            }
+            // Reload vision photos
+            const newPhotosData = await dataService.getVisionPhotos();
+            setVisionPhotos(newPhotosData.map(v => ({
+              id: v.id,
+              src: v.src,
+              alt: v.alt
+            })));
+          }
           
           // Set up real-time subscriptions
           dataService.subscribeToCategories((newCategories) => {
