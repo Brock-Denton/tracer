@@ -75,6 +75,11 @@ function formatHMS(totalSeconds: number) {
   return parts.join(" ");
 }
 
+function truncateText(text: string, maxLength: number = 18): string {
+  if (text.length <= maxLength) return text;
+  return text.substring(0, 16) + "..";
+}
+
 function startOfDay(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
@@ -470,7 +475,8 @@ function VisionPage({
   setGoals, 
   setVisionPhotos, 
   addCategory,
-  isAuthenticated 
+  isAuthenticated,
+  stopAllActiveTimers
 }: {
   categories: Category[];
   goals: Goal[];
@@ -479,6 +485,7 @@ function VisionPage({
   setVisionPhotos: (fn: (prev: VisionPhoto[]) => VisionPhoto[]) => void;
   addCategory: (cat: { name: string; goalPct?: number; color: string; parentId: string | null }) => void;
   isAuthenticated: boolean;
+  stopAllActiveTimers: () => Promise<void>;
 }) {
   const [goalText, setGoalText] = useState("");
   const [selCat, setSelCat] = useState<string | "">("");
@@ -590,28 +597,10 @@ function VisionPage({
     const goal = goals.find(g => g.id === id);
     if (!goal || goal.completed) return; // Can't toggle timer on completed goals
     
-    // Stop any other running goals first (just like categories)
-    const runningGoal = goals.find(g => g.isActive && g.id !== id);
-    
-    if (isAuthenticated) {
-      try {
-        // Stop any currently running goal
-        if (runningGoal) {
-          const now = Date.now();
-          const sessionSeconds = runningGoal.lastStartTime 
-            ? Math.floor((now - runningGoal.lastStartTime) / 1000) 
-            : 0;
-          const newTotal = (runningGoal.totalSeconds || 0) + sessionSeconds;
-          
-          await dataService.updateGoal(runningGoal.id, {
-            is_active: false,
-            total_seconds: newTotal,
-            last_start_time: null
-          });
-        }
-        
-        if (goal.isActive) {
-          // Stop this timer
+    if (goal.isActive) {
+      // Goal is currently active - stop it
+      if (isAuthenticated) {
+        try {
           const now = Date.now();
           const sessionSeconds = goal.lastStartTime 
             ? Math.floor((now - goal.lastStartTime) / 1000) 
@@ -623,51 +612,73 @@ function VisionPage({
             total_seconds: newTotal,
             last_start_time: null
           });
-        } else {
-          // Start timer on this goal
+        } catch (error) {
+          console.error("Error stopping goal timer:", error);
+          alert("Failed to stop goal timer. Please try again.");
+          return;
+        }
+      } else {
+        // Local state for unauthenticated users
+        setGoals(prev => prev.map(g => {
+          if (g.id === id) {
+            const now = Date.now();
+            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+          }
+          return g;
+        }));
+      }
+    } else {
+      // Goal is not active - stop all other timers and start this one
+      await stopAllActiveTimers();
+      
+      if (isAuthenticated) {
+        try {
           await dataService.updateGoal(id, {
             is_active: true,
             last_start_time: new Date().toISOString()
           });
-        }
         
-        // Manually refresh goals
-        const goalsData = await dataService.getGoals();
-        setGoals(() => goalsData.map(g => ({
-          id: g.id,
-          text: g.text,
-          categoryId: g.category_id,
-          completed: g.completed,
-          createdAt: new Date(g.created_at).getTime(),
-          totalSeconds: g.total_seconds || 0,
-          isActive: g.is_active || false,
-          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
-        })));
-      } catch (error) {
-        console.error("Error toggling goal timer:", error);
-        alert("Failed to update goal timer. Please try again.");
-      }
-    } else {
-      // Local state for unauthenticated users
-      setGoals(prev => prev.map(g => {
-        if (g.id === id) {
-          if (g.isActive) {
-            // Stop this goal's timer
-            const now = Date.now();
-            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
-            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
-          } else {
-            // Start this goal's timer
+          // Manually refresh goals
+          const goalsData = await dataService.getGoals();
+          setGoals(() => goalsData.map(g => ({
+            id: g.id,
+            text: g.text,
+            categoryId: g.category_id,
+            completed: g.completed,
+            createdAt: new Date(g.created_at).getTime(),
+            totalSeconds: g.total_seconds || 0,
+            isActive: g.is_active || false,
+            lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+          })));
+        } catch (error) {
+          console.error("Error starting goal timer:", error);
+          alert("Failed to start goal timer. Please try again.");
+        }
+      } else {
+        // Local state for unauthenticated users - since we already stopped all timers, just start this goal
+        setGoals(prev => prev.map(g => {
+          if (g.id === id) {
             return { ...g, isActive: true, lastStartTime: Date.now() };
           }
-        } else if (g.isActive) {
-          // Stop any other running goal
-          const now = Date.now();
-          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
-          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
-        }
-        return g;
-      }));
+          return g;
+        }));
+      }
+    }
+    
+    // Refresh goals for both authenticated and unauthenticated users
+    if (isAuthenticated) {
+      const goalsData = await dataService.getGoals();
+      setGoals(() => goalsData.map(g => ({
+        id: g.id,
+        text: g.text,
+        categoryId: g.category_id,
+        completed: g.completed,
+        createdAt: new Date(g.created_at).getTime(),
+        totalSeconds: g.total_seconds || 0,
+        isActive: g.is_active || false,
+        lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+      })));
     }
   }
 
@@ -1233,7 +1244,7 @@ function TimerDisplay({
   if (runningSession) {
     return (
       <>
-        <div className="text-lg font-semibold mt-1">{runningName}</div>
+        <div className="text-lg font-semibold mt-1">{truncateText(runningName)}</div>
         <div className="text-sm mt-1">{formatHMS(displayTime)}</div>
       </>
     );
@@ -1488,7 +1499,6 @@ export default function TimeTrackerMVP() {
   const [rangeMenuOpen, setRangeMenuOpen] = useState(false);
   const rangeMenuRef = useRef<boolean>(false);
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
-  const scrollPositionRef = useRef<number>(0); // null = top-level
   const [editMode, setEditMode] = useState(false); // pencil toggle for overlay edit icons
 
   // A ticking value that increments each second to drive live updates.
@@ -1506,6 +1516,22 @@ export default function TimeTrackerMVP() {
   useEffect(() => {
     runSelfTests();
   }, []);
+
+  // Restore activeId when sessions or goals change (for app reload scenarios)
+  useEffect(() => {
+    if (!isAuthenticated) return; // Only for authenticated users
+    
+    const runningSession = sessions.find(s => !s.end);
+    const activeGoal = goals.find(g => g.isActive);
+    
+    if (runningSession && activeId !== runningSession.categoryId) {
+      setActiveId(runningSession.categoryId);
+    } else if (activeGoal && activeId !== activeGoal.categoryId) {
+      setActiveId(activeGoal.categoryId);
+    } else if (!runningSession && !activeGoal && activeId !== null) {
+      setActiveId(null);
+    }
+  }, [sessions, goals, isAuthenticated, activeId]);
 
   // Initialize Supabase auth and data
   useEffect(() => {
@@ -1536,14 +1562,15 @@ export default function TimeTrackerMVP() {
             parentId: c.parent_id || undefined
           })));
           
-          setSessions(sessionsData.map(s => ({
+          const sessionsFormatted = sessionsData.map(s => ({
             id: s.id,
             categoryId: s.category_id,
             start: new Date(s.start_time).getTime(),
             end: s.end_time ? new Date(s.end_time).getTime() : undefined
-          })));
+          }));
+          setSessions(sessionsFormatted);
           
-          setGoals(() => goalsData.map(g => ({
+          const goalsFormatted = goalsData.map(g => ({
             id: g.id,
             text: g.text,
             categoryId: g.category_id,
@@ -1552,7 +1579,20 @@ export default function TimeTrackerMVP() {
             totalSeconds: g.total_seconds || 0,
             isActive: g.is_active || false,
             lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
-          })));
+          }));
+          setGoals(goalsFormatted);
+          
+          // Restore activeId based on running sessions or active goals
+          const runningSession = sessionsFormatted.find(s => !s.end);
+          const activeGoal = goalsFormatted.find(g => g.isActive);
+          
+          if (runningSession) {
+            setActiveId(runningSession.categoryId);
+          } else if (activeGoal) {
+            setActiveId(activeGoal.categoryId);
+          } else {
+            setActiveId(null);
+          }
           
           setVisionPhotos(visionPhotosData.map(v => ({
             id: v.id,
@@ -1730,7 +1770,7 @@ export default function TimeTrackerMVP() {
 
   // Actions
   async function startCategory(id: string) {
-    await stopRunning();
+    await stopAllActiveTimers();
     
     if (isAuthenticated) {
       try {
@@ -1856,10 +1896,57 @@ export default function TimeTrackerMVP() {
     }
   }
 
-  const toggleCategory = useCallback(async (id: string) => {
-    // Store current scroll position
-    scrollPositionRef.current = window.scrollY;
+  // Helper to stop ALL active timers (both sessions and goals)
+  async function stopAllActiveTimers() {
+    // Stop any running session
+    await stopRunning();
     
+    // Stop all active goals
+    const activeGoals = goals.filter(g => g.isActive);
+    
+    if (isAuthenticated) {
+      for (const goal of activeGoals) {
+        const now = Date.now();
+        const sessionSeconds = goal.lastStartTime 
+          ? Math.floor((now - goal.lastStartTime) / 1000) 
+          : 0;
+        const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+        
+        await dataService.updateGoal(goal.id, {
+          is_active: false,
+          total_seconds: newTotal,
+          last_start_time: null
+        });
+      }
+      
+      // Refresh goals if any were stopped
+      if (activeGoals.length > 0) {
+        const goalsData = await dataService.getGoals();
+        setGoals(() => goalsData.map(g => ({
+          id: g.id,
+          text: g.text,
+          categoryId: g.category_id,
+          completed: g.completed,
+          createdAt: new Date(g.created_at).getTime(),
+          totalSeconds: g.total_seconds || 0,
+          isActive: g.is_active || false,
+          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+        })));
+      }
+    } else {
+      // Local state for unauthenticated users
+      setGoals(prev => prev.map(g => {
+        if (g.isActive) {
+          const now = Date.now();
+          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+        }
+        return g;
+      }));
+    }
+  }
+
+  const toggleCategory = useCallback(async (id: string) => {
     // Check if this category is highlighted due to active children/goals
     const isHighlighted = isCategoryHighlighted(id);
     
@@ -1874,11 +1961,6 @@ export default function TimeTrackerMVP() {
       // Start new session on this category
       await startCategory(id);
     }
-    
-    // Restore scroll position after state update
-    requestAnimationFrame(() => {
-      window.scrollTo(0, scrollPositionRef.current);
-    });
   }, [activeId, sessions, goals, categories]);
 
   async function handleLogin() {
@@ -2304,7 +2386,6 @@ export default function TimeTrackerMVP() {
       <div className="rounded-2xl p-4 mb-4 bg-[#161925] border border-[#1f2337]">
         <div className="flex flex-wrap items-center gap-3">
           <input
-            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={parentId ? "Subcategory name" : "Category name"}
@@ -2349,11 +2430,11 @@ export default function TimeTrackerMVP() {
     const hasMeasurement = chartSize.width > 0 && chartSize.height > 0;
     const baseSize = 200;
     const pieSize = hasMeasurement
-      ? Math.min(chartSize.width, chartSize.height) * 0.95
+      ? Math.min(chartSize.width, chartSize.height) * 0.9
       : baseSize;
     const radiusScale = pieSize / baseSize;
-    const innerRadius = 70 * radiusScale;
-    const outerRadius = 100 * radiusScale;
+    const innerRadius = 75 * radiusScale;
+    const outerRadius = 95 * radiusScale;
 
 
     return (
@@ -2378,25 +2459,9 @@ export default function TimeTrackerMVP() {
         {/* Dial and Range selector */}
         <div className="px-5 mt-4">
           <div className="bg-[#161925] rounded-2xl p-5 shadow-lg relative overflow-visible">
-            {/* Range buttons */}
-            <div className="text-center -mt-6 mb-2 select-none relative z-10">
-              <div className="flex justify-center gap-3 mt-2 text-[13px] flex-wrap">
-                {(["Today", "Week", "Month", "Year", "All"] as Range[]).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setRange(r)}
-                    className={`px-3 py-1 rounded-full transition ${
-                      r === range ? "bg-white text-black" : "bg-[#23283f] text-white/90 hover:bg-[#293050]"
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
             <div
                  ref={chartRef}
-                 className="h-56 flex items-center justify-center px-4"
+                 className="h-64 flex items-center justify-center"
                  onMouseEnter={() => { setChartHover(true); hoverNowRef.current = Date.now(); }}
                  onMouseLeave={() => { setChartHover(false); hoverNowRef.current = null; }}
             >
@@ -2418,6 +2483,7 @@ export default function TimeTrackerMVP() {
                   dataKey="value"
                   paddingAngle={2}
                   isAnimationActive={false}
+                  cornerRadius={3}
                 >
                   {chartData.map((entry, index) => (
                     <Cell key={`slice-${index}`} fill={entry.color} />
@@ -2436,12 +2502,40 @@ export default function TimeTrackerMVP() {
                 <div className="text-xs opacity-70 mb-1">{todayStr}</div>
                 {runningSession ? (
                   <>
-                    <div className="text-lg font-semibold mt-1">{runningName}</div>
+                    <div className="text-lg font-semibold mt-1">{truncateText(runningName)}</div>
                     <div className="text-sm mt-1">{formatHMS(runningTotalSeconds)}</div>
                   </>
                 ) : (
                   <>
-                    <div className="text-[13px] opacity-80 mt-1">{range}</div>
+                    {/* Clickable range selector */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setRangeMenuOpen(!rangeMenuOpen)}
+                        className="text-[13px] opacity-80 mt-1 hover:opacity-100 transition-opacity pointer-events-auto px-2 py-1 rounded-lg hover:bg-white/10"
+                      >
+                        {range} ▼
+                      </button>
+                      
+                      {/* Range dropdown menu - positioned inside the dial */}
+                      {rangeMenuOpen && (
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 bg-[#161925] border border-[#1f2337] rounded-xl shadow-xl z-50 min-w-[120px] pointer-events-auto">
+                          {(["Today", "Week", "Month", "Year", "All"] as Range[]).map((r) => (
+                            <button
+                              key={r}
+                              onClick={() => {
+                                setRange(r);
+                                setRangeMenuOpen(false);
+                              }}
+                              className={`w-full px-4 py-2 text-left text-sm transition-colors first:rounded-t-xl last:rounded-b-xl hover:bg-[#1a1d2e] ${
+                                r === range ? "bg-blue-600/20 text-blue-400" : "text-white"
+                              }`}
+                            >
+                              {r}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
                 <div className="text-center text-sm opacity-80 mt-2">
@@ -2495,7 +2589,7 @@ export default function TimeTrackerMVP() {
             />
           )}
 
-        <div className="space-y-3" style={{ scrollBehavior: 'auto' }}>
+        <div className="space-y-3">
           {visibleCategories.map((c) => {
             const seconds = rolledSeconds[c.id] || 0;
             const pct = sharePct(c.id);
@@ -2607,6 +2701,7 @@ export default function TimeTrackerMVP() {
         setVisionPhotos={setVisionPhotos}
         addCategory={addCategory}
         isAuthenticated={isAuthenticated}
+        stopAllActiveTimers={stopAllActiveTimers}
       />}
 
       {/* Bottom Nav - Fixed to bottom */}
