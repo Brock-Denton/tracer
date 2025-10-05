@@ -101,10 +101,12 @@ function rangeBounds(range: Range): { start: number; end: number } {
     case "Week":
       return { start: startOfWeek(new Date(now)), end: now };
     case "Month":
-      return { start: startOfMonth(new Date(now)), end: now };
+      // Rolling 30 days instead of calendar month
+      return { start: now - (30 * 24 * 60 * 60 * 1000), end: now };
     case "Year":
       return { start: startOfYear(new Date(now)), end: now };
     case "All":
+      return { start: 0, end: now };
     default:
       return { start: 0, end: now };
   }
@@ -153,7 +155,46 @@ function computeDirectSeconds(
       const totalSeconds = (g.totalSeconds || 0) + currentElapsed;
       
       if (totalSeconds > 0) {
-        totals[g.categoryId] = (totals[g.categoryId] ?? 0) + totalSeconds;
+        // Determine if any of this goal's time falls within the selected window
+        let timeInWindow = 0;
+        
+        if (g.isActive && g.lastStartTime) {
+          // Goal is currently active - check if the active period overlaps with the window
+          const activeStart = g.lastStartTime;
+          const activeEnd = Date.now();
+          
+          // Calculate overlap between active period and selected window
+          const overlapStart = Math.max(activeStart, windowStart);
+          const overlapEnd = Math.min(activeEnd, windowEnd);
+          
+          if (overlapStart < overlapEnd) {
+            // There's overlap - calculate how much of the current session falls in the window
+            const overlapMs = overlapEnd - overlapStart;
+            timeInWindow += overlapMs / 1000;
+          }
+        }
+        
+        // For completed goals, we need to estimate if their logged time falls within the window
+        // Since we don't track individual goal sessions, we'll use a heuristic:
+        // If the goal was created within the window, assume all its logged time falls within the window
+        // If it was created before the window but completed within the window, include some time
+        if (!g.isActive && (g.totalSeconds || 0) > 0) {
+          const goalCreatedAt = g.createdAt;
+          
+          if (goalCreatedAt >= windowStart && goalCreatedAt <= windowEnd) {
+            // Goal was created within the window - include all its logged time
+            timeInWindow += g.totalSeconds || 0;
+          } else if (goalCreatedAt < windowStart) {
+            // Goal was created before the window
+            // We can't accurately determine how much time falls within the window
+            // without tracking individual goal sessions, so we'll exclude it
+            // This is a limitation of the current data model
+          }
+        }
+        
+        if (timeInWindow > 0) {
+          totals[g.categoryId] = (totals[g.categoryId] ?? 0) + timeInWindow;
+        }
       }
     }
   }
@@ -420,6 +461,7 @@ function useElementSize<T extends HTMLElement>() {
   return [ref, size] as const;
 }
 
+
 // VisionPage component - defined outside to prevent re-creation on timer updates
 function VisionPage({ 
   categories, 
@@ -479,11 +521,11 @@ function VisionPage({
           alert("Failed to upload image. Please try again.");
         }
       } else {
-        setVisionPhotos(prev => prev.map((p, i) => (
-          i === idx
-            ? { ...p, src: result, alt: file.name || p.alt }
-            : p
-        )));
+      setVisionPhotos(prev => prev.map((p, i) => (
+        i === idx
+          ? { ...p, src: result, alt: file.name || p.alt }
+          : p
+      )));
       }
     };
     reader.onerror = () => {
@@ -538,9 +580,9 @@ function VisionPage({
         alert("Failed to create goal. Please try again.");
       }
     } else {
-      const g: Goal = { id: uid(), text, categoryId: target, completed: false, createdAt: Date.now() };
-      setGoals(prev => [g, ...prev]);
-      setGoalText("");
+    const g: Goal = { id: uid(), text, categoryId: target, completed: false, createdAt: Date.now() };
+    setGoals(prev => [g, ...prev]);
+    setGoalText("");
     }
   }
 
@@ -718,11 +760,11 @@ function VisionPage({
             alert("Failed to update goal. Please try again.");
           }
         } else {
-          setGoals(prev => prev.map(g => 
-            g.id === editingGoal 
-              ? { ...g, text: editingText.trim(), categoryId: targetCategory }
-              : g
-          ));
+        setGoals(prev => prev.map(g => 
+          g.id === editingGoal 
+            ? { ...g, text: editingText.trim(), categoryId: targetCategory }
+            : g
+        ));
         }
       }
     }
@@ -762,7 +804,7 @@ function VisionPage({
           alert("Failed to delete goal. Please try again.");
         }
       } else {
-        setGoals(prev => prev.filter(g => g.id !== id));
+      setGoals(prev => prev.filter(g => g.id !== id));
       }
     }
   }
@@ -795,11 +837,11 @@ function VisionPage({
           alert("Failed to update image text. Please try again.");
         }
       } else {
-        setVisionPhotos(prev => prev.map((p, i) => 
-          i === editingImage 
-            ? { ...p, alt: editingImageText.trim() }
-            : p
-        ));
+      setVisionPhotos(prev => prev.map((p, i) => 
+        i === editingImage 
+          ? { ...p, alt: editingImageText.trim() }
+          : p
+      ));
       }
     }
     setEditingImage(null);
@@ -819,7 +861,7 @@ function VisionPage({
       <div className="max-w-3xl mx-auto space-y-5">
         {/* First grid of photos (hidden - indices 0-3) */}
         <div className="hidden">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
             {visionPhotos.slice(0, 4).map((p, idx) => (
               <div key={`hidden-${p.id}`} className="relative bg-[#161925] border border-[#1f2337] rounded-2xl overflow-hidden">
                 <div className="aspect-square overflow-hidden">
@@ -1030,7 +1072,7 @@ function VisionPage({
                           >
                             <div className="text-sm">{g.text}</div>
                             <div className="text-xs opacity-70 mt-1">{formatHMS(totalElapsed)}</div>
-                          </div>
+                        </div>
                           <button
                             onClick={(e) => { e.stopPropagation(); startEditing(g); }}
                             className="opacity-60 hover:opacity-100 flex-shrink-0"
@@ -1131,12 +1173,12 @@ function VisionPage({
                     ) : (
                       <>
                         <div className="flex-1">
-                          <div 
+                      <div 
                             className="text-sm" 
-                            style={{ textDecoration: "line-through", textDecorationThickness: "1px", textDecorationColor: color }}
-                          >
-                            {g.text}
-                          </div>
+                        style={{ textDecoration: "line-through", textDecorationThickness: "1px", textDecorationColor: color }}
+                      >
+                        {g.text}
+                      </div>
                           <div className="text-xs opacity-70 mt-1">{formatHMS(totalElapsed)}</div>
                         </div>
                         <button
@@ -1595,11 +1637,11 @@ export default function TimeTrackerMVP() {
         }
         
         // Load preferences from localStorage
-        const prefsRaw = localStorage.getItem(PREFS_KEY);
-        if (prefsRaw) {
-          const p = JSON.parse(prefsRaw);
-          if (p.preferredRange) setRange(p.preferredRange as Range);
-        }
+      const prefsRaw = localStorage.getItem(PREFS_KEY);
+      if (prefsRaw) {
+        const p = JSON.parse(prefsRaw);
+        if (p.preferredRange) setRange(p.preferredRange as Range);
+      }
         
       } catch (error) {
         console.error("Error initializing app:", error);
@@ -1716,9 +1758,9 @@ export default function TimeTrackerMVP() {
       }
     } else {
       // Fallback for unauthenticated users
-      const newS: Session = { id: uid(), categoryId: id, start: Date.now() };
-      setSessions((prev) => [...prev, newS]);
-      setActiveId(id);
+    const newS: Session = { id: uid(), categoryId: id, start: Date.now() };
+    setSessions((prev) => [...prev, newS]);
+    setActiveId(id);
     }
   }
 
@@ -1751,17 +1793,17 @@ export default function TimeTrackerMVP() {
         }
       } else {
         // Fallback for unauthenticated users
-        setSessions((prev) => {
-          const next = [...prev];
-          for (let i = next.length - 1; i >= 0; i--) {
-            if (next[i].end == null) {
-              next[i] = { ...next[i], end: Date.now() };
-              break;
-            }
-          }
-          return next;
-        });
-        setActiveId(null);
+    setSessions((prev) => {
+      const next = [...prev];
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i].end == null) {
+          next[i] = { ...next[i], end: Date.now() };
+          break;
+        }
+      }
+      return next;
+    });
+    setActiveId(null);
       }
     }
   }
@@ -1853,7 +1895,7 @@ export default function TimeTrackerMVP() {
         if (user) {
           setUserName(user.username);
           setIsAuthenticated(true);
-          setTempName("");
+      setTempName("");
           
           // Reload to load user data
           window.location.reload();
@@ -1879,7 +1921,7 @@ export default function TimeTrackerMVP() {
         if (user) {
           setUserName(user.username);
           setIsAuthenticated(true);
-          setTempName("");
+      setTempName("");
           
           // Create default categories for new user
           const categoriesData = await dataService.getCategories();
@@ -1916,10 +1958,10 @@ export default function TimeTrackerMVP() {
   async function handleLogout() {
     try {
       await dataService.signOut();
-      setUserName("");
-      setTempName("");
+    setUserName("");
+    setTempName("");
       setIsAuthenticated(false);
-      setAuthMode("login");
+    setAuthMode("login");
       setCategories(DEFAULT_CATEGORIES);
       setSessions([]);
       setGoals([]);
@@ -2074,12 +2116,12 @@ export default function TimeTrackerMVP() {
         alert("Failed to reset data. Please try again.");
       }
     } else {
-      setCategories(DEFAULT_CATEGORIES);
-      setSessions([]);
-      setActiveId(null);
-      setCurrentParentId(null);
-      setVisionPhotos(DEFAULT_VISION);
-      setGoals([]);
+    setCategories(DEFAULT_CATEGORIES);
+    setSessions([]);
+    setActiveId(null);
+    setCurrentParentId(null);
+    setVisionPhotos(DEFAULT_VISION);
+    setGoals([]);
     }
   }
 
@@ -2146,7 +2188,7 @@ export default function TimeTrackerMVP() {
         alert("Failed to update category. Please try again.");
       }
     } else {
-      setCategories((prev) => prev.map((c) => (c.id === editingId ? { ...c, name, goalPct: goal || undefined, color: editColor, icon: editIcon } : c)));
+    setCategories((prev) => prev.map((c) => (c.id === editingId ? { ...c, name, goalPct: goal || undefined, color: editColor, icon: editIcon } : c)));
     }
     
     setEditingId(null);
@@ -2189,8 +2231,8 @@ export default function TimeTrackerMVP() {
         alert("Failed to delete category. Please try again.");
       }
     } else {
-      setCategories((prev) => prev.filter((c) => c.id !== id));
-      setSessions((prev) => prev.filter((s) => s.categoryId !== id));
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+    setSessions((prev) => prev.filter((s) => s.categoryId !== id));
     }
     
     if (activeId === id) setActiveId(null);
@@ -2312,6 +2354,7 @@ export default function TimeTrackerMVP() {
     const radiusScale = pieSize / baseSize;
     const innerRadius = 70 * radiusScale;
     const outerRadius = 100 * radiusScale;
+
 
     return (
       <>
@@ -2454,76 +2497,71 @@ export default function TimeTrackerMVP() {
 
         <div className="space-y-3" style={{ scrollBehavior: 'auto' }}>
           {visibleCategories.map((c) => {
-              const seconds = rolledSeconds[c.id] || 0;
-              const pct = sharePct(c.id);
-              const goal = c.goalPct ?? null;
-              const goalText = goal != null ? `Goal of ${goal}%` : "";
-              const isHighlighted = isCategoryHighlighted(c.id); // Cascading highlight from children/goals
+            const seconds = rolledSeconds[c.id] || 0;
+            const pct = sharePct(c.id);
+            const goal = c.goalPct ?? null;
+            const goalText = goal != null ? `Goal of ${goal}%` : "";
+            const isHighlighted = isCategoryHighlighted(c.id);
+            const highlight = isHighlighted ? `${c.color}33` : undefined;
 
-              const highlight = isHighlighted ? `${c.color}33` : undefined; // tint active row
-
-              return (
-                <div
-                  key={c.id}
-                  className="relative rounded-2xl p-4 bg-[#161925] shadow border border-[#1f2337] cursor-pointer select-none"
-                  style={{ background: highlight }}
-                  onClick={(e) => { 
-                    e.preventDefault(); 
-                    e.stopPropagation();
-                    toggleCategory(c.id); 
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(c.id); } }}
-                >
-                  {/* Overlay pencil (at all levels when edit mode is on) */}
-                  {editMode && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openEditor(c.id); }}
-                      className="absolute left-1 top-1 opacity-60 hover:opacity-100"
-                      title="Edit"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-left" style={{ width: "100%" }}>
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{ background: c.color + "26" }}>
-                        <span className="select-none">{c.icon ?? "🕒"}</span>
-                      </div>
-                      <div className="flex-1">
-                        <div className="text-[15px] font-medium">{c.name}</div>
-                        <div className="text-xs opacity-70 mt-0.5">{goalText}</div>
-                      </div>
-                      <div className="text-[15px] font-semibold tabular-nums min-w-[120px] text-right">
-                        {formatHMS(seconds)}
-                      </div>
-                      {/* Root-only chevron to enter subcategories */}
-                      {!currentParentId && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openSubcategories(c.id); }}
-                          className="ml-2 p-1 rounded-lg border border-[#2a2f45] bg-[#0f1117] hover:border-white/50"
-                          title="Open subcategories"
-                        >
-                          <ChevronRight size={16} />
-                        </button>
-                      )}
+            return (
+              <div
+                key={c.id}
+                className="relative rounded-2xl p-4 bg-[#161925] shadow border border-[#1f2337] cursor-pointer select-none"
+                onClick={() => toggleCategory(c.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(c.id); } }}
+              >
+                {/* Overlay pencil (at all levels when edit mode is on) */}
+                {editMode && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEditor(c.id); }}
+                    className="absolute right-2 top-2 opacity-60 hover:opacity-100"
+                    title="Edit"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                )}
+                
+                <div className="flex items-center justify-between" style={{ background: highlight }}>
+                  <div className="flex items-center gap-3 text-left" style={{ width: "100%" }}>
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{ background: c.color + "26" }}>
+                      <span className="select-none">{c.icon ?? "🕒"}</span>
                     </div>
-                  </div>
-                  {/* progress vs goal (also part of the big button) */}
-                  <div className="mt-3">
-                    <div className="h-2 w-full bg-[#0f1117] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
+                    <div className="flex-1">
+                      <div className="text-[15px] font-medium">{c.name}</div>
+                      <div className="text-xs opacity-70 mt-0.5">{goalText}</div>
                     </div>
-                    <div className="flex justify-between text-xs opacity-70 mt-1">
-                      <span>Share {pct}%</span>
-                      {goal != null && <span>Goal {goal}%</span>}
+                    <div className="text-[15px] font-semibold tabular-nums min-w-[120px] text-right">
+                      {formatHMS(seconds)}
                     </div>
+                    {/* Root-only chevron to enter subcategories */}
+                    {!currentParentId && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openSubcategories(c.id); }}
+                        className="ml-2 p-1 rounded-lg border border-[#2a2f45] bg-[#0f1117] hover:border-white/50"
+                        title="Open subcategories"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                {/* progress vs goal (also part of the big button) */}
+                <div className="mt-3">
+                  <div className="h-2 w-full bg-[#0f1117] rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
+                  </div>
+                  <div className="flex justify-between text-xs opacity-70 mt-1">
+                    <span>Share {pct}%</span>
+                    {goal != null && <span>Goal {goal}%</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
         </div>
       </>
     );
