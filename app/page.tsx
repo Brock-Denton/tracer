@@ -2606,6 +2606,7 @@ export default function TimeTrackerMVP() {
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(c.id); } }}
+                style={{ background: highlight }}
               >
                 {/* Overlay pencil (at all levels when edit mode is on) */}
                 {editMode && (
@@ -2618,7 +2619,7 @@ export default function TimeTrackerMVP() {
                   </button>
                 )}
                 
-                <div className="flex items-center justify-between" style={{ background: highlight }}>
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 text-left" style={{ width: "100%" }}>
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl" style={{ background: c.color + "26" }}>
                       <span className="select-none">{c.icon ?? "🕒"}</span>
