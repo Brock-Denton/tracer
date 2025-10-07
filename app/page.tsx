@@ -39,6 +39,14 @@ type Goal = {
   lastStartTime?: number;
 };
 
+type GoalSession = {
+  id: string;
+  goal_id: string;
+  start_time: string; // ISO string
+  end_time?: string; // ISO string, undefined while running
+  duration_seconds?: number;
+};
+
 // --- Helpers ---
 const uid = () => Math.random().toString(36).slice(2);
 
@@ -141,7 +149,8 @@ function computeDirectSeconds(
   sessions: Session[],
   windowStart: number,
   windowEnd: number,
-  goals?: Goal[]
+  goals?: Goal[],
+  goalSessions?: GoalSession[]
 ): Record<string, number> {
   const totals: Record<string, number> = {};
   
@@ -152,55 +161,17 @@ function computeDirectSeconds(
     if (ms > 0) totals[s.categoryId] = (totals[s.categoryId] ?? 0) + ms / 1000;
   }
   
-  // Add goal times
-  if (goals) {
-    for (const g of goals) {
-      // Calculate current elapsed time for active goals
-      const currentElapsed = g.isActive && g.lastStartTime 
-        ? Math.floor((Date.now() - g.lastStartTime) / 1000)
-        : 0;
-      const totalSeconds = (g.totalSeconds || 0) + currentElapsed;
-      
-      if (totalSeconds > 0) {
-        // Determine if any of this goal's time falls within the selected window
-        let timeInWindow = 0;
-        
-        if (g.isActive && g.lastStartTime) {
-          // Goal is currently active - check if the active period overlaps with the window
-          const activeStart = g.lastStartTime;
-          const activeEnd = Date.now();
-          
-          // Calculate overlap between active period and selected window
-          const overlapStart = Math.max(activeStart, windowStart);
-          const overlapEnd = Math.min(activeEnd, windowEnd);
-          
-          if (overlapStart < overlapEnd) {
-            // There's overlap - calculate how much of the current session falls in the window
-            const overlapMs = overlapEnd - overlapStart;
-            timeInWindow += overlapMs / 1000;
-          }
-        }
-        
-        // For completed goals, we need to estimate if their logged time falls within the window
-        // Since we don't track individual goal sessions, we'll use a heuristic:
-        // If the goal was created within the window, assume all its logged time falls within the window
-        // If it was created before the window but completed within the window, include some time
-        if (!g.isActive && (g.totalSeconds || 0) > 0) {
-          const goalCreatedAt = g.createdAt;
-          
-          if (goalCreatedAt >= windowStart && goalCreatedAt <= windowEnd) {
-            // Goal was created within the window - include all its logged time
-            timeInWindow += g.totalSeconds || 0;
-          } else if (goalCreatedAt < windowStart) {
-            // Goal was created before the window
-            // We can't accurately determine how much time falls within the window
-            // without tracking individual goal sessions, so we'll exclude it
-            // This is a limitation of the current data model
-          }
-        }
-        
-        if (timeInWindow > 0) {
-          totals[g.categoryId] = (totals[g.categoryId] ?? 0) + timeInWindow;
+  // Add goal session times (same logic as regular sessions)
+  if (goalSessions && goals) {
+    for (const gs of goalSessions) {
+      const end = gs.end_time ? new Date(gs.end_time).getTime() : Date.now();
+      const start = new Date(gs.start_time).getTime();
+      const ms = overlapMs(start, end, windowStart, windowEnd);
+      if (ms > 0) {
+        // Find the goal to get the categoryId
+        const goal = goals.find(g => g.id === gs.goal_id);
+        if (goal) {
+          totals[goal.categoryId] = (totals[goal.categoryId] ?? 0) + ms / 1000;
         }
       }
     }
@@ -293,7 +264,7 @@ function runSelfTests() {
     { id: "s1", categoryId: "c1", start: 0, end: 10_000 }, // 10 sec
     { id: "s2", categoryId: "c1", start: 20_000, end: 40_000 }, // 20 sec
   ];
-  const direct = computeDirectSeconds(sessions, 0, 60_000);
+  const direct = computeDirectSeconds(sessions, 0, 60_000, undefined, []);
   const rolled = rollupSeconds(cats, direct);
   console.assert(direct["c1"] === 30, `direct child wrong: ${direct["c1"]}`);
   console.assert(rolled["p"] === 30, `rollup parent wrong: ${rolled["p"]}`);
@@ -1481,6 +1452,51 @@ function HomePage({
   );
 }
 
+// --- Helper Functions ---
+async function createDefaultGoalSessions(goals: Goal[], goalSessions: GoalSession[]) {
+  for (const goal of goals) {
+    // Check if goal already has sessions
+    const existingSessions = goalSessions.filter(gs => gs.goal_id === goal.id);
+    
+    if (existingSessions.length === 0) {
+      // Create default session based on goal state
+      if (goal.isActive && goal.lastStartTime) {
+        // Active goal: create session from lastStartTime to now
+        await dataService.createGoalSession({
+          goal_id: goal.id,
+          start_time: new Date(goal.lastStartTime).toISOString(),
+          end_time: new Date().toISOString(),
+          duration_seconds: Math.floor((Date.now() - goal.lastStartTime) / 1000)
+        });
+      } else if (!goal.isActive && goal.totalSeconds && goal.totalSeconds > 0) {
+        // Completed goal: back-calculate sessions from updatedAt
+        const totalSeconds = goal.totalSeconds;
+        const updatedAt = new Date(goal.createdAt + (goal.totalSeconds * 1000)); // Estimate completion time
+        const secondsPerDay = 24 * 60 * 60;
+        const days = Math.ceil(totalSeconds / secondsPerDay);
+        
+        for (let i = 0; i < days; i++) {
+          const sessionDate = new Date(updatedAt);
+          sessionDate.setDate(sessionDate.getDate() - i);
+          const sessionStart = new Date(sessionDate);
+          sessionStart.setHours(0, 0, 0, 0);
+          const sessionEnd = new Date(sessionDate);
+          sessionEnd.setHours(23, 59, 59, 999);
+          
+          const sessionSeconds = Math.min(totalSeconds - (i * secondsPerDay), secondsPerDay);
+          
+          await dataService.createGoalSession({
+            goal_id: goal.id,
+            start_time: sessionStart.toISOString(),
+            end_time: sessionEnd.toISOString(),
+            duration_seconds: sessionSeconds
+          });
+        }
+      }
+    }
+  }
+}
+
 // --- Main Component ---
 export default function TimeTrackerMVP() {
   const [page, setPage] = useState<Page>("Time");
@@ -1492,6 +1508,7 @@ export default function TimeTrackerMVP() {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [goalSessions, setGoalSessions] = useState<GoalSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const [visionPhotos, setVisionPhotos] = useState<VisionPhoto[]>([]);
@@ -1547,10 +1564,11 @@ export default function TimeTrackerMVP() {
           setUserName(user.username || user.display_name || "");
           
           // Load data from Supabase
-          const [categoriesData, sessionsData, goalsData, visionPhotosData] = await Promise.all([
+          const [categoriesData, sessionsData, goalsData, goalSessionsData, visionPhotosData] = await Promise.all([
             dataService.getCategories(),
             dataService.getSessions(),
             dataService.getGoals(),
+            dataService.getGoalSessions(),
             dataService.getVisionPhotos()
           ]);
           
@@ -1573,6 +1591,9 @@ export default function TimeTrackerMVP() {
           }));
           setSessions(sessionsFormatted);
           
+          // Set goal sessions (no formatting needed, already in correct format)
+          setGoalSessions(goalSessionsData);
+          
           const goalsFormatted = goalsData.map(g => ({
             id: g.id,
             text: g.text,
@@ -1584,6 +1605,13 @@ export default function TimeTrackerMVP() {
             lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
           }));
           setGoals(goalsFormatted);
+          
+          // Create default goal sessions for goals without sessions
+          await createDefaultGoalSessions(goalsFormatted, goalSessionsData);
+          
+          // Refresh goal sessions data after creating default sessions
+          const updatedGoalSessionsData = await dataService.getGoalSessions();
+          setGoalSessions(updatedGoalSessionsData);
           
           // Restore activeId based on running sessions or active goals
           const runningSession = sessionsFormatted.find(s => !s.end);
@@ -1734,8 +1762,8 @@ export default function TimeTrackerMVP() {
 
   // Direct & rolled-up totals (live)
   const directSeconds = useMemo(
-    () => computeDirectSeconds(sessions, windowStart, windowEnd, goals),
-    [sessions, windowStart, windowEnd, goals, tick]
+    () => computeDirectSeconds(sessions, windowStart, windowEnd, goals, goalSessions),
+    [sessions, windowStart, windowEnd, goals, goalSessions, tick]
   );
   const rolledSeconds = useMemo(
     () => rollupSeconds(categories, directSeconds),
@@ -1745,8 +1773,8 @@ export default function TimeTrackerMVP() {
   // Direct & rolled-up totals for CHART only (freeze while hovering)
   const directSecondsChart = useMemo(() => {
     const endForChart = chartHover && hoverNowRef.current ? hoverNowRef.current : windowEnd;
-    return computeDirectSeconds(sessions, windowStart, endForChart, goals);
-  }, [sessions, windowStart, windowEnd, goals, chartHover, tick]);
+    return computeDirectSeconds(sessions, windowStart, endForChart, goals, goalSessions);
+  }, [sessions, windowStart, windowEnd, goals, goalSessions, chartHover, tick]);
   const rolledSecondsChart = useMemo(
     () => rollupSeconds(categories, directSecondsChart),
     [categories, directSecondsChart]
@@ -2169,10 +2197,11 @@ export default function TimeTrackerMVP() {
     if (isAuthenticated) {
       try {
         // Delete all user data from Supabase
-        const [categoriesData, sessionsData, goalsData, visionPhotosData] = await Promise.all([
+        const [categoriesData, sessionsData, goalsData, goalSessionsData, visionPhotosData] = await Promise.all([
           dataService.getCategories(),
           dataService.getSessions(),
           dataService.getGoals(),
+          dataService.getGoalSessions(),
           dataService.getVisionPhotos()
         ]);
         
@@ -2181,6 +2210,7 @@ export default function TimeTrackerMVP() {
           ...categoriesData.map(c => dataService.deleteCategory(c.id)),
           ...sessionsData.map(s => dataService.deleteSession(s.id)),
           ...goalsData.map(g => dataService.deleteGoal(g.id)),
+          ...goalSessionsData.map(gs => dataService.deleteGoalSession(gs.id)),
           ...visionPhotosData.map(v => dataService.deleteVisionPhoto(v.id))
         ]);
         

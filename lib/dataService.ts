@@ -17,6 +17,10 @@ type VisionPhoto = Database['public']['Tables']['vision_photos']['Row']
 type VisionPhotoInsert = Database['public']['Tables']['vision_photos']['Insert']
 type VisionPhotoUpdate = Database['public']['Tables']['vision_photos']['Update']
 
+type GoalSession = Database['public']['Tables']['goal_sessions']['Row']
+type GoalSessionInsert = Database['public']['Tables']['goal_sessions']['Insert']
+type GoalSessionUpdate = Database['public']['Tables']['goal_sessions']['Update']
+
 export class DataService {
   private userId: string | null = null
   private username: string | null = null
@@ -313,6 +317,77 @@ export class DataService {
 
     if (error) {
       console.error('Error deleting goal:', error)
+      return false
+    }
+
+    return true
+  }
+
+  // Goal Session methods
+  async getGoalSessions(): Promise<GoalSession[]> {
+    if (!this.userId) return []
+    
+    const { data, error } = await supabase
+      .from('goal_sessions')
+      .select('*')
+      .eq('user_id', this.userId)
+      .order('start_time', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching goal sessions:', error)
+      return []
+    }
+
+    return data || []
+  }
+
+  async createGoalSession(goalSession: Omit<GoalSessionInsert, 'user_id'>): Promise<GoalSession | null> {
+    if (!this.userId) return null
+
+    const { data, error } = await supabase
+      .from('goal_sessions')
+      .insert({ ...goalSession, user_id: this.userId })
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error creating goal session:', error)
+      return null
+    }
+
+    return data
+  }
+
+  async updateGoalSession(id: string, updates: GoalSessionUpdate): Promise<GoalSession | null> {
+    if (!this.userId) return null
+
+    const { data, error } = await supabase
+      .from('goal_sessions')
+      .update(updates)
+      .eq('id', id)
+      .eq('user_id', this.userId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error updating goal session:', error)
+      return null
+    }
+
+    return data
+  }
+
+  async deleteGoalSession(id: string): Promise<boolean> {
+    if (!this.userId) return false
+
+    const { error } = await supabase
+      .from('goal_sessions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', this.userId)
+
+    if (error) {
+      console.error('Error deleting goal session:', error)
       return false
     }
 

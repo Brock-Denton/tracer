@@ -117,6 +117,38 @@ export interface Database {
           updated_at?: string
         }
       }
+      goal_sessions: {
+        Row: {
+          id: string
+          user_id: string
+          goal_id: string
+          start_time: string
+          end_time: string | null
+          duration_seconds: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          goal_id: string
+          start_time: string
+          end_time?: string | null
+          duration_seconds?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          goal_id?: string
+          start_time?: string
+          end_time?: string | null
+          duration_seconds?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
       vision_photos: {
         Row: {
           id: string
