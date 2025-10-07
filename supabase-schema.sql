@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS categories (
   goal_pct INTEGER CHECK (goal_pct >= 0 AND goal_pct <= 100),
   icon TEXT,
   parent_id UUID REFERENCES categories(id) ON DELETE CASCADE,
+  exclude_from_goals BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

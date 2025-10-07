@@ -18,6 +18,7 @@ export interface Database {
           goal_pct: number | null
           icon: string | null
           parent_id: string | null
+          exclude_from_goals: boolean
           created_at: string
           updated_at: string
         }
@@ -29,6 +30,7 @@ export interface Database {
           goal_pct?: number | null
           icon?: string | null
           parent_id?: string | null
+          exclude_from_goals?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -40,6 +42,7 @@ export interface Database {
           goal_pct?: number | null
           icon?: string | null
           parent_id?: string | null
+          exclude_from_goals?: boolean
           created_at?: string
           updated_at?: string
         }

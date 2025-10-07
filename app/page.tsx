@@ -14,6 +14,7 @@ type Category = {
   goalPct?: number; // optional share-of-time goal for the selected range
   icon?: string; // emoji for simplicity
   parentId?: string | null; // null/undefined = top-level
+  excludeFromGoals?: boolean; // if true, don't count toward 100% goal calculation
 };
 
 type Session = {
@@ -104,7 +105,8 @@ function rangeBounds(range: Range): { start: number; end: number } {
     case "Today":
       return { start: startOfDay(new Date(now)), end: now };
     case "Week":
-      return { start: startOfWeek(new Date(now)), end: now };
+      // Rolling 7 days instead of calendar week
+      return { start: now - (7 * 24 * 60 * 60 * 1000), end: now };
     case "Month":
       // Rolling 30 days instead of calendar month
       return { start: now - (30 * 24 * 60 * 60 * 1000), end: now };
@@ -340,7 +342,7 @@ function runSelfTests() {
 function computeChildGoalSum(categories: Category[], parentId: string, override?: { id?: string; goal?: number }) {
   let sum = 0;
   for (const c of categories) {
-    if (c.parentId === parentId) {
+    if (c.parentId === parentId && !c.excludeFromGoals) {
       const val = (override && override.id === c.id)
         ? (override.goal ?? 0)
         : (c.goalPct ?? 0);
@@ -361,7 +363,7 @@ function computeChildGoalSum(categories: Category[], parentId: string, override?
 function computeRootGoalSum(categories: Category[], override?: { id?: string; goal?: number }) {
   let sum = 0;
   for (const c of categories) {
-    if (c.parentId == null) {
+    if (c.parentId == null && !c.excludeFromGoals) {
       const val = (override && override.id === c.id)
         ? (override.goal ?? 0)
         : (c.goalPct ?? 0);
@@ -1559,7 +1561,8 @@ export default function TimeTrackerMVP() {
             color: c.color,
             goalPct: c.goal_pct || undefined,
             icon: c.icon || undefined,
-            parentId: c.parent_id || undefined
+            parentId: c.parent_id || undefined,
+            excludeFromGoals: c.exclude_from_goals || false
           })));
           
           const sessionsFormatted = sessionsData.map(s => ({
@@ -1627,7 +1630,8 @@ export default function TimeTrackerMVP() {
               color: c.color,
               goalPct: c.goal_pct || undefined,
               icon: c.icon || undefined,
-              parentId: c.parent_id || undefined
+              parentId: c.parent_id || undefined,
+              excludeFromGoals: c.exclude_from_goals || false
             })));
           });
           
@@ -1760,7 +1764,11 @@ export default function TimeTrackerMVP() {
   );
 
   const grandTotalVisible = useMemo(
-    () => visibleCategories.reduce((sum, c) => sum + (rolledSeconds[c.id] ?? 0), 0),
+    () => visibleCategories.reduce((sum, c) => {
+      // Exclude categories marked as excludeFromGoals from the total
+      if (c.excludeFromGoals) return sum;
+      return sum + (rolledSeconds[c.id] ?? 0);
+    }, 0),
     [visibleCategories, rolledSeconds]
   );
 
@@ -2014,7 +2022,8 @@ export default function TimeTrackerMVP() {
                 color: category.color,
                 goal_pct: category.goalPct || null,
                 icon: category.icon || null,
-                parent_id: null
+                parent_id: null,
+                exclude_from_goals: false
               });
             }
             
@@ -2110,7 +2119,8 @@ export default function TimeTrackerMVP() {
         color: finalColor,
         goal_pct: cat.goalPct || null,
         icon: "🕒",
-        parent_id: cat.parentId
+        parent_id: cat.parentId,
+        exclude_from_goals: false
       });
       
       if (newCategory) {
@@ -2123,7 +2133,8 @@ export default function TimeTrackerMVP() {
           color: c.color,
           goalPct: c.goal_pct || undefined,
           icon: c.icon || undefined,
-          parentId: c.parent_id || undefined
+          parentId: c.parent_id || undefined,
+          excludeFromGoals: c.exclude_from_goals || false
         })));
       }
     } catch (error) {
@@ -2180,7 +2191,8 @@ export default function TimeTrackerMVP() {
             color: category.color,
             goal_pct: category.goalPct || null,
             icon: category.icon || null,
-            parent_id: null
+            parent_id: null,
+            exclude_from_goals: false
           });
         }
         
@@ -2212,6 +2224,7 @@ export default function TimeTrackerMVP() {
   const [editGoal, setEditGoal] = useState<string>("");
   const [editColor, setEditColor] = useState("#888888");
   const [editIcon, setEditIcon] = useState<string>("🕒");
+  const [editExcludeFromGoals, setEditExcludeFromGoals] = useState(false);
 
   function openEditor(id: string) {
     const cat = categories.find((c) => c.id === id);
@@ -2221,6 +2234,7 @@ export default function TimeTrackerMVP() {
     setEditGoal(cat.goalPct != null ? String(cat.goalPct) : "");
     setEditColor(cat.color);
     setEditIcon(cat.icon ?? "🕒");
+    setEditExcludeFromGoals(cat.excludeFromGoals ?? false);
   }
 
   async function saveEditor() {
@@ -2252,7 +2266,8 @@ export default function TimeTrackerMVP() {
           name,
           goal_pct: goal || null,
           color: editColor,
-          icon: editIcon
+          icon: editIcon,
+          exclude_from_goals: editExcludeFromGoals
         });
         
         // Manually refresh categories
@@ -2263,14 +2278,15 @@ export default function TimeTrackerMVP() {
           color: c.color,
           goalPct: c.goal_pct || undefined,
           icon: c.icon || undefined,
-          parentId: c.parent_id || undefined
+          parentId: c.parent_id || undefined,
+          excludeFromGoals: c.exclude_from_goals || false
         })));
       } catch (error) {
         console.error("Error updating category:", error);
         alert("Failed to update category. Please try again.");
       }
     } else {
-    setCategories((prev) => prev.map((c) => (c.id === editingId ? { ...c, name, goalPct: goal || undefined, color: editColor, icon: editIcon } : c)));
+    setCategories((prev) => prev.map((c) => (c.id === editingId ? { ...c, name, goalPct: goal || undefined, color: editColor, icon: editIcon, excludeFromGoals: editExcludeFromGoals } : c)));
     }
     
     setEditingId(null);
@@ -2299,7 +2315,8 @@ export default function TimeTrackerMVP() {
           color: c.color,
           goalPct: c.goal_pct || undefined,
           icon: c.icon || undefined,
-          parentId: c.parent_id || undefined
+          parentId: c.parent_id || undefined,
+          excludeFromGoals: c.exclude_from_goals || false
         })));
         
         setSessions(sessionsData.map(s => ({
@@ -2323,6 +2340,15 @@ export default function TimeTrackerMVP() {
 
   // UI helpers
   function sharePct(catId: string) {
+    const category = categories.find(c => c.id === catId);
+    if (!category) return 0;
+    
+    // Excluded categories don't show any percentage
+    if (category.excludeFromGoals) {
+      return 0;
+    }
+    
+    // For included categories, show their percentage of included time only
     if (grandTotalVisible === 0) return 0;
     return Math.round(((rolledSeconds[catId] || 0) / grandTotalVisible) * 100);
   }
@@ -2649,7 +2675,7 @@ export default function TimeTrackerMVP() {
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
                   </div>
                   <div className="flex justify-between text-xs opacity-70 mt-1">
-                    <span>Share {pct}%</span>
+                    <span>{c.excludeFromGoals ? "Excluded" : `Share ${pct}%`}</span>
                     {goal != null && <span>Goal {goal}%</span>}
                   </div>
                 </div>
@@ -2753,6 +2779,18 @@ export default function TimeTrackerMVP() {
                           </button>
                         ))}
                       </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="w-24 text-sm opacity-80"></label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={editExcludeFromGoals} 
+                          onChange={(e)=>setEditExcludeFromGoals(e.target.checked)} 
+                          className="w-4 h-4 rounded border-[#2a2f45] bg-[#0f1117] checked:bg-blue-600"
+                        />
+                        <span className="text-sm opacity-80">Exclude from 100% goal calculation</span>
+                      </label>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 mt-5">
