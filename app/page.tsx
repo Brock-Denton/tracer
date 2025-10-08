@@ -41,10 +41,13 @@ type Goal = {
 
 type GoalSession = {
   id: string;
+  user_id: string;
   goal_id: string;
   start_time: string; // ISO string
-  end_time?: string; // ISO string, undefined while running
-  duration_seconds?: number;
+  end_time: string | null; // ISO string, null while running
+  duration_seconds: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 // --- Helpers ---
@@ -1453,49 +1456,6 @@ function HomePage({
 }
 
 // --- Helper Functions ---
-async function createDefaultGoalSessions(goals: Goal[], goalSessions: GoalSession[]) {
-  for (const goal of goals) {
-    // Check if goal already has sessions
-    const existingSessions = goalSessions.filter(gs => gs.goal_id === goal.id);
-    
-    if (existingSessions.length === 0) {
-      // Create default session based on goal state
-      if (goal.isActive && goal.lastStartTime) {
-        // Active goal: create session from lastStartTime to now
-        await dataService.createGoalSession({
-          goal_id: goal.id,
-          start_time: new Date(goal.lastStartTime).toISOString(),
-          end_time: new Date().toISOString(),
-          duration_seconds: Math.floor((Date.now() - goal.lastStartTime) / 1000)
-        });
-      } else if (!goal.isActive && goal.totalSeconds && goal.totalSeconds > 0) {
-        // Completed goal: back-calculate sessions from updatedAt
-        const totalSeconds = goal.totalSeconds;
-        const updatedAt = new Date(goal.createdAt + (goal.totalSeconds * 1000)); // Estimate completion time
-        const secondsPerDay = 24 * 60 * 60;
-        const days = Math.ceil(totalSeconds / secondsPerDay);
-        
-        for (let i = 0; i < days; i++) {
-          const sessionDate = new Date(updatedAt);
-          sessionDate.setDate(sessionDate.getDate() - i);
-          const sessionStart = new Date(sessionDate);
-          sessionStart.setHours(0, 0, 0, 0);
-          const sessionEnd = new Date(sessionDate);
-          sessionEnd.setHours(23, 59, 59, 999);
-          
-          const sessionSeconds = Math.min(totalSeconds - (i * secondsPerDay), secondsPerDay);
-          
-          await dataService.createGoalSession({
-            goal_id: goal.id,
-            start_time: sessionStart.toISOString(),
-            end_time: sessionEnd.toISOString(),
-            duration_seconds: sessionSeconds
-          });
-        }
-      }
-    }
-  }
-}
 
 // --- Main Component ---
 export default function TimeTrackerMVP() {
@@ -1606,12 +1566,7 @@ export default function TimeTrackerMVP() {
           }));
           setGoals(goalsFormatted);
           
-          // Create default goal sessions for goals without sessions
-          await createDefaultGoalSessions(goalsFormatted, goalSessionsData);
-          
-          // Refresh goal sessions data after creating default sessions
-          const updatedGoalSessionsData = await dataService.getGoalSessions();
-          setGoalSessions(updatedGoalSessionsData);
+          // Goal sessions are already created, no need to create default ones
           
           // Restore activeId based on running sessions or active goals
           const runningSession = sessionsFormatted.find(s => !s.end);
