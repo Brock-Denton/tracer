@@ -1735,14 +1735,16 @@ export default function TimeTrackerMVP() {
     [categories, directSecondsChart]
   );
 
-  // Chart data (use chart-frozen values)
+  // Chart data (use chart-frozen values, exclude categories marked as excludeFromGoals)
   const chartData = useMemo(
     () =>
-      visibleCategories.map((c) => ({
-        name: c.name,
-        value: rolledSecondsChart[c.id] || 0,
-        color: c.color,
-      })),
+      visibleCategories
+        .filter((c) => !c.excludeFromGoals) // Exclude categories from goals
+        .map((c) => ({
+          name: c.name,
+          value: rolledSecondsChart[c.id] || 0,
+          color: c.color,
+        })),
     [visibleCategories, rolledSecondsChart]
   );
 
