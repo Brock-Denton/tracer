@@ -1750,8 +1750,7 @@ export default function TimeTrackerMVP() {
 
   const grandTotalVisible = useMemo(
     () => visibleCategories.reduce((sum, c) => {
-      // Exclude categories marked as excludeFromGoals from the total
-      if (c.excludeFromGoals) return sum;
+      // Include ALL categories in the total (including excludeFromGoals)
       return sum + (rolledSeconds[c.id] ?? 0);
     }, 0),
     [visibleCategories, rolledSeconds]
@@ -2330,12 +2329,7 @@ export default function TimeTrackerMVP() {
     const category = categories.find(c => c.id === catId);
     if (!category) return 0;
     
-    // Excluded categories don't show any percentage
-    if (category.excludeFromGoals) {
-      return 0;
-    }
-    
-    // For included categories, show their percentage of included time only
+    // Calculate percentage of total time for all categories (including excluded ones)
     if (grandTotalVisible === 0) return 0;
     return Math.round(((rolledSeconds[catId] || 0) / grandTotalVisible) * 100);
   }
@@ -2662,7 +2656,7 @@ export default function TimeTrackerMVP() {
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
                   </div>
                   <div className="flex justify-between text-xs opacity-70 mt-1">
-                    <span>{c.excludeFromGoals ? "Excluded" : `Share ${pct}%`}</span>
+                    <span>Share {pct}%</span>
                     {goal != null && <span>Goal {goal}%</span>}
                   </div>
                 </div>
