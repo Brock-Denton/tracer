@@ -1962,6 +1962,16 @@ export default function TimeTrackerMVP() {
           : 0;
         const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
         
+        // Create a goal session to record this time
+        if (goal.lastStartTime) {
+          await dataService.createGoalSession({
+            goal_id: goal.id,
+            start_time: new Date(goal.lastStartTime).toISOString(),
+            end_time: new Date(now).toISOString(),
+            duration_seconds: sessionSeconds
+          });
+        }
+        
         await dataService.updateGoal(goal.id, {
           is_active: false,
           total_seconds: newTotal,
@@ -1969,9 +1979,13 @@ export default function TimeTrackerMVP() {
         });
       }
       
-      // Refresh goals if any were stopped
+      // Refresh goals and goal sessions if any were stopped
       if (activeGoals.length > 0) {
-        const goalsData = await dataService.getGoals();
+        const [goalsData, goalSessionsData] = await Promise.all([
+          dataService.getGoals(),
+          dataService.getGoalSessions()
+        ]);
+        
         setGoals(() => goalsData.map(g => ({
           id: g.id,
           text: g.text,
@@ -1982,6 +1996,8 @@ export default function TimeTrackerMVP() {
           isActive: g.is_active || false,
           lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
         })));
+        
+        setGoalSessions(goalSessionsData);
       }
     } else {
       // Local state for unauthenticated users
@@ -2001,8 +2017,9 @@ export default function TimeTrackerMVP() {
     const isHighlighted = isCategoryHighlighted(id);
     
     if (activeId === id) {
-      // Direct session running on this category - stop it
+      // Direct session running on this category - stop it and any child goals
       await stopRunning();
+      await stopActiveGoalsUnder(id); // Also stop any active goals under this category
     } else if (isHighlighted) {
       // Category is highlighted due to active child/goal - stop all active items under this category
       await stopRunning(); // Stop any active session
@@ -2387,6 +2404,9 @@ export default function TimeTrackerMVP() {
     const category = categories.find(c => c.id === catId);
     if (!category) return 0;
     
+    // Don't show percentage for excluded categories
+    if (category.excludeFromGoals) return 0;
+    
     // Calculate percentage of total time for all categories (including excluded ones)
     if (grandTotalVisible === 0) return 0;
     return Math.round(((rolledSeconds[catId] || 0) / grandTotalVisible) * 100);
@@ -2405,6 +2425,7 @@ export default function TimeTrackerMVP() {
     const childIds = categories.filter(c => c.parentId === catId).map(c => c.id);
     const allRelatedIds = [catId, ...childIds];
     const hasActiveGoal = goals.some(g => g.isActive && allRelatedIds.includes(g.categoryId));
+    
     if (hasActiveGoal) return true;
     
     return false;
@@ -2716,7 +2737,7 @@ export default function TimeTrackerMVP() {
                     <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
                   </div>
                   <div className="flex justify-between text-xs opacity-70 mt-1">
-                    <span>Share {pct}%</span>
+                    <span>{c.excludeFromGoals ? "Excluded" : `Share ${pct}%`}</span>
                     {goal != null && <span>Goal {goal}%</span>}
                   </div>
                 </div>
