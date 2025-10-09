@@ -180,6 +180,27 @@ function computeDirectSeconds(
     }
   }
   
+  // Add live goal times (for active goals that are currently running)
+  if (goals) {
+    for (const g of goals) {
+      if (g.isActive && g.lastStartTime && g.categoryId) {
+        // Calculate current elapsed time for active goals
+        const activeStart = g.lastStartTime;
+        const activeEnd = Date.now();
+        
+        // Calculate overlap between active period and selected window
+        const overlapStart = Math.max(activeStart, windowStart);
+        const overlapEnd = Math.min(activeEnd, windowEnd);
+        
+        if (overlapStart < overlapEnd) {
+          // There's overlap - calculate how much of the current session falls in the window
+          const overlapMs = overlapEnd - overlapStart;
+          totals[g.categoryId] = (totals[g.categoryId] ?? 0) + overlapMs / 1000;
+        }
+      }
+    }
+  }
+  
   return totals;
 }
 
@@ -452,7 +473,8 @@ function VisionPage({
   setVisionPhotos, 
   addCategory,
   isAuthenticated,
-  stopAllActiveTimers
+  stopAllActiveTimers,
+  toggleGoalTimer
 }: {
   categories: Category[];
   goals: Goal[];
@@ -462,6 +484,7 @@ function VisionPage({
   addCategory: (cat: { name: string; goalPct?: number; color: string; parentId: string | null }) => void;
   isAuthenticated: boolean;
   stopAllActiveTimers: () => Promise<void>;
+  toggleGoalTimer: (id: string) => Promise<void>;
 }) {
   const [goalText, setGoalText] = useState("");
   const [selCat, setSelCat] = useState<string | "">("");
@@ -569,94 +592,6 @@ function VisionPage({
     }
   }
 
-  async function toggleGoalTimer(id: string) {
-    const goal = goals.find(g => g.id === id);
-    if (!goal || goal.completed) return; // Can't toggle timer on completed goals
-    
-    if (goal.isActive) {
-      // Goal is currently active - stop it
-      if (isAuthenticated) {
-        try {
-          const now = Date.now();
-          const sessionSeconds = goal.lastStartTime 
-            ? Math.floor((now - goal.lastStartTime) / 1000) 
-            : 0;
-          const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
-          
-          await dataService.updateGoal(id, {
-            is_active: false,
-            total_seconds: newTotal,
-            last_start_time: null
-          });
-        } catch (error) {
-          console.error("Error stopping goal timer:", error);
-          alert("Failed to stop goal timer. Please try again.");
-          return;
-        }
-      } else {
-        // Local state for unauthenticated users
-        setGoals(prev => prev.map(g => {
-          if (g.id === id) {
-            const now = Date.now();
-            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
-            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
-          }
-          return g;
-        }));
-      }
-    } else {
-      // Goal is not active - stop all other timers and start this one
-      await stopAllActiveTimers();
-      
-      if (isAuthenticated) {
-        try {
-          await dataService.updateGoal(id, {
-            is_active: true,
-            last_start_time: new Date().toISOString()
-          });
-        
-          // Manually refresh goals
-          const goalsData = await dataService.getGoals();
-          setGoals(() => goalsData.map(g => ({
-            id: g.id,
-            text: g.text,
-            categoryId: g.category_id,
-            completed: g.completed,
-            createdAt: new Date(g.created_at).getTime(),
-            totalSeconds: g.total_seconds || 0,
-            isActive: g.is_active || false,
-            lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
-          })));
-        } catch (error) {
-          console.error("Error starting goal timer:", error);
-          alert("Failed to start goal timer. Please try again.");
-        }
-      } else {
-        // Local state for unauthenticated users - since we already stopped all timers, just start this goal
-        setGoals(prev => prev.map(g => {
-          if (g.id === id) {
-            return { ...g, isActive: true, lastStartTime: Date.now() };
-          }
-          return g;
-        }));
-      }
-    }
-    
-    // Refresh goals for both authenticated and unauthenticated users
-    if (isAuthenticated) {
-      const goalsData = await dataService.getGoals();
-      setGoals(() => goalsData.map(g => ({
-        id: g.id,
-        text: g.text,
-        categoryId: g.category_id,
-        completed: g.completed,
-        createdAt: new Date(g.created_at).getTime(),
-        totalSeconds: g.total_seconds || 0,
-        isActive: g.is_active || false,
-        lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
-      })));
-    }
-  }
 
   async function toggleGoalCompletion(id: string) {
     const goal = goals.find(g => g.id === id);
@@ -940,7 +875,7 @@ function VisionPage({
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-              <button onClick={createNewRoot} className="mt-2 text-xs px-2 py-1 rounded-lg border border-[#2a2f45] bg-[#0f1117] hover:border-white/50">+ New Category</button>
+              <button onClick={(e) => { e.preventDefault(); createNewRoot(); }} className="mt-2 text-xs px-2 py-1 rounded-lg border border-[#2a2f45] bg-[#0f1117] hover:border-white/50">+ New Category</button>
             </div>
             <div>
               <div className="text-xs opacity-70 mb-1">Or Subcategory</div>
@@ -955,11 +890,11 @@ function VisionPage({
                   <option key={sc.id} value={sc.id}>{sc.name}</option>
                 ))}
               </select>
-              <button onClick={createNewSub} className="mt-2 text-xs px-2 py-1 rounded-lg border border-[#2a2f45] bg-[#0f1117] hover:border-white/50" disabled={!selCat}>+ New Subcategory</button>
+              <button onClick={(e) => { e.preventDefault(); createNewSub(); }} className="mt-2 text-xs px-2 py-1 rounded-lg border border-[#2a2f45] bg-[#0f1117] hover:border-white/50" disabled={!selCat}>+ New Subcategory</button>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2">
-            <button onClick={saveGoal} className="px-3 py-2 rounded-xl border border-[#2a2f45] bg-white text-black">Save</button>
+            <button onClick={(e) => { e.preventDefault(); saveGoal(); }} className="px-3 py-2 rounded-xl border border-[#2a2f45] bg-white text-black">Save</button>
             <div className="text-xs opacity-60">Saved under: {selSub ? getCategoryPathName(categories, selSub) : (selCat ? getCategoryPathName(categories, selCat) : "—")}</div>
           </div>
 
@@ -987,7 +922,7 @@ function VisionPage({
                       style={{ background: highlight || '#0b0e15' }}
                     >
                       <button 
-                        onClick={()=>toggleGoalCompletion(g.id)} 
+                        onClick={(e) => { e.preventDefault(); toggleGoalCompletion(g.id); }} 
                         className={`w-5 h-5 rounded-full border hover:opacity-80 transition-opacity flex-shrink-0`}
                         style={{ borderColor: color, background: g.completed ? color : 'transparent' }} 
                         title={g.completed ? "Mark incomplete" : "Mark complete"} 
@@ -1054,7 +989,11 @@ function VisionPage({
                         <>
                           <div 
                             className="flex-1 cursor-pointer hover:opacity-80 transition-opacity" 
-                            onClick={() => toggleGoalTimer(g.id)}
+                            onClick={(e) => { 
+                              e.preventDefault(); 
+                              e.stopPropagation(); 
+                              setTimeout(() => toggleGoalTimer(g.id), 0);
+                            }}
                             title={isRunning ? "Click to stop timer" : "Click to start timer"}
                           >
                             <div className="text-sm">{g.text}</div>
@@ -1790,9 +1729,9 @@ export default function TimeTrackerMVP() {
       }
     } else {
       // Fallback for unauthenticated users
-    const newS: Session = { id: uid(), categoryId: id, start: Date.now() };
-    setSessions((prev) => [...prev, newS]);
-    setActiveId(id);
+      const newS: Session = { id: uid(), categoryId: id, start: Date.now() };
+      setSessions((prev) => [...prev, newS]);
+      setActiveId(id);
     }
   }
 
@@ -1825,18 +1764,121 @@ export default function TimeTrackerMVP() {
         }
       } else {
         // Fallback for unauthenticated users
-    setSessions((prev) => {
-      const next = [...prev];
-      for (let i = next.length - 1; i >= 0; i--) {
-        if (next[i].end == null) {
-          next[i] = { ...next[i], end: Date.now() };
-          break;
+        setSessions((prev) => {
+          const next = [...prev];
+          for (let i = next.length - 1; i >= 0; i--) {
+            if (next[i].end == null) {
+              next[i] = { ...next[i], end: Date.now() };
+              break;
+            }
+          }
+          return next;
+        });
+        setActiveId(null);
+      }
+    }
+  }
+
+  async function toggleGoalTimer(id: string) {
+    const goal = goals.find(g => g.id === id);
+    if (!goal || goal.completed) return; // Can't toggle timer on completed goals
+    
+    if (goal.isActive) {
+      // Goal is currently active - stop it
+      if (isAuthenticated) {
+        try {
+          const now = Date.now();
+          const sessionSeconds = goal.lastStartTime 
+            ? Math.floor((now - goal.lastStartTime) / 1000) 
+            : 0;
+          const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+          
+          // Create a goal session to record this time
+          if (goal.lastStartTime) {
+            await dataService.createGoalSession({
+              goal_id: id,
+              start_time: new Date(goal.lastStartTime).toISOString(),
+              end_time: new Date(now).toISOString(),
+              duration_seconds: sessionSeconds
+            });
+          }
+          
+          await dataService.updateGoal(id, {
+            is_active: false,
+            total_seconds: newTotal,
+            last_start_time: null
+          });
+          
+          // Refresh goal sessions to ensure UI updates
+          const goalSessionsData = await dataService.getGoalSessions();
+          setGoalSessions(goalSessionsData);
+        } catch (error) {
+          console.error("Error stopping goal timer:", error);
+          alert("Failed to stop goal timer. Please try again.");
+          return;
         }
+      } else {
+        // Local state for unauthenticated users
+        setGoals(prev => prev.map(g => {
+          if (g.id === id) {
+            const now = Date.now();
+            const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
+            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+          }
+          return g;
+        }));
       }
-      return next;
-    });
-    setActiveId(null);
+    } else {
+      // Goal is not active - stop all other timers and start this one
+      await stopAllActiveTimers();
+      
+      if (isAuthenticated) {
+        try {
+          await dataService.updateGoal(id, {
+            is_active: true,
+            last_start_time: new Date().toISOString()
+          });
+        
+          // Manually refresh goals
+          const goalsData = await dataService.getGoals();
+          setGoals(() => goalsData.map(g => ({
+            id: g.id,
+            text: g.text,
+            categoryId: g.category_id,
+            completed: g.completed,
+            createdAt: new Date(g.created_at).getTime(),
+            totalSeconds: g.total_seconds || 0,
+            isActive: g.is_active || false,
+            lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+          })));
+        } catch (error) {
+          console.error("Error starting goal timer:", error);
+          alert("Failed to start goal timer. Please try again.");
+        }
+      } else {
+        // Local state for unauthenticated users - since we already stopped all timers, just start this goal
+        setGoals(prev => prev.map(g => {
+          if (g.id === id) {
+            return { ...g, isActive: true, lastStartTime: Date.now() };
+          }
+          return g;
+        }));
       }
+    }
+    
+    // Refresh goals for both authenticated and unauthenticated users
+    if (isAuthenticated) {
+      const goalsData = await dataService.getGoals();
+      setGoals(() => goalsData.map(g => ({
+        id: g.id,
+        text: g.text,
+        categoryId: g.category_id,
+        completed: g.completed,
+        createdAt: new Date(g.created_at).getTime(),
+        totalSeconds: g.total_seconds || 0,
+        isActive: g.is_active || false,
+        lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
+      })));
     }
   }
 
@@ -1854,6 +1896,16 @@ export default function TimeTrackerMVP() {
           : 0;
         const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
         
+        // Create a goal session to record this time
+        if (goal.lastStartTime) {
+          await dataService.createGoalSession({
+            goal_id: goal.id,
+            start_time: new Date(goal.lastStartTime).toISOString(),
+            end_time: new Date(now).toISOString(),
+            duration_seconds: sessionSeconds
+          });
+        }
+        
         await dataService.updateGoal(goal.id, {
           is_active: false,
           total_seconds: newTotal,
@@ -1861,9 +1913,13 @@ export default function TimeTrackerMVP() {
         });
       }
       
-      // Refresh goals if any were stopped
+      // Refresh goals and goal sessions if any were stopped
       if (activeGoalsUnder.length > 0) {
-        const goalsData = await dataService.getGoals();
+        const [goalsData, goalSessionsData] = await Promise.all([
+          dataService.getGoals(),
+          dataService.getGoalSessions()
+        ]);
+        
         setGoals(() => goalsData.map(g => ({
           id: g.id,
           text: g.text,
@@ -1874,6 +1930,8 @@ export default function TimeTrackerMVP() {
           isActive: g.is_active || false,
           lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
         })));
+        
+        setGoalSessions(goalSessionsData);
       }
     } else {
       // Local state for unauthenticated users
@@ -2609,11 +2667,13 @@ export default function TimeTrackerMVP() {
               <div
                 key={c.id}
                 className="relative rounded-2xl p-4 bg-[#161925] shadow border border-[#1f2337] cursor-pointer select-none"
-                onClick={() => toggleCategory(c.id)}
+                onClick={(e) => { 
+                  e.preventDefault(); 
+                  e.stopPropagation(); 
+                  setTimeout(() => toggleCategory(c.id), 0);
+                }}
                 role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCategory(c.id); } }}
-                style={{ background: highlight }}
+                style={{ background: highlight, scrollBehavior: 'auto' }}
               >
                 {/* Overlay pencil (at all levels when edit mode is on) */}
                 {editMode && (
@@ -2710,6 +2770,7 @@ export default function TimeTrackerMVP() {
         addCategory={addCategory}
         isAuthenticated={isAuthenticated}
         stopAllActiveTimers={stopAllActiveTimers}
+        toggleGoalTimer={toggleGoalTimer}
       />}
 
       {/* Bottom Nav - Fixed to bottom */}
