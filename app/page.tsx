@@ -1420,6 +1420,7 @@ export default function TimeTrackerMVP() {
   const [editMode, setEditMode] = useState(false); // pencil toggle for overlay edit icons
   const [sessionViewerOpen, setSessionViewerOpen] = useState(false);
   const [sessionViewerCategoryId, setSessionViewerCategoryId] = useState<string | null>(null);
+  const [isProcessingTimer, setIsProcessingTimer] = useState(false); // prevent race conditions
 
   // A ticking value that increments each second to drive live updates.
   // Pause the live tick while adding/editing to keep inputs snappy.
@@ -1703,6 +1704,9 @@ export default function TimeTrackerMVP() {
 
   // Actions
   async function startCategory(id: string) {
+    // Prevent concurrent operations
+    if (isProcessingTimer) return;
+    
     await stopAllActiveTimers();
     
     if (isAuthenticated) {
@@ -1782,6 +1786,9 @@ export default function TimeTrackerMVP() {
   }
 
   async function toggleGoalTimer(id: string) {
+    // Prevent concurrent operations
+    if (isProcessingTimer) return;
+    
     const goal = goals.find(g => g.id === id);
     if (!goal || goal.completed) return; // Can't toggle timer on completed goals
     
@@ -1950,39 +1957,45 @@ export default function TimeTrackerMVP() {
 
   // Helper to stop ALL active timers (both sessions and goals)
   async function stopAllActiveTimers() {
-    // Stop any running session
-    await stopRunning();
+    // Prevent concurrent operations
+    if (isProcessingTimer) return;
     
-    // Stop all active goals
-    const activeGoals = goals.filter(g => g.isActive);
+    setIsProcessingTimer(true);
+    const stopTime = Date.now(); // Use consistent timestamp for all calculations
     
-    if (isAuthenticated) {
-      for (const goal of activeGoals) {
-        const now = Date.now();
-        const sessionSeconds = goal.lastStartTime 
-          ? Math.floor((now - goal.lastStartTime) / 1000) 
-          : 0;
-        const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
-        
-        // Create a goal session to record this time
-        if (goal.lastStartTime) {
-          await dataService.createGoalSession({
-            goal_id: goal.id,
-            start_time: new Date(goal.lastStartTime).toISOString(),
-            end_time: new Date(now).toISOString(),
-            duration_seconds: sessionSeconds
-          });
-        }
-        
-        await dataService.updateGoal(goal.id, {
-          is_active: false,
-          total_seconds: newTotal,
-          last_start_time: null
-        });
-      }
+    try {
+      // Stop any running session
+      await stopRunning();
       
-      // Refresh goals and goal sessions if any were stopped
-      if (activeGoals.length > 0) {
+      // Stop all active goals
+      const activeGoals = goals.filter(g => g.isActive);
+      
+      if (isAuthenticated && activeGoals.length > 0) {
+        // Process all goal updates in parallel for atomicity
+        await Promise.all(activeGoals.map(async (goal) => {
+          const sessionSeconds = goal.lastStartTime 
+            ? Math.floor((stopTime - goal.lastStartTime) / 1000) 
+            : 0;
+          const newTotal = (goal.totalSeconds || 0) + sessionSeconds;
+          
+          // Create a goal session to record this time (only if sessionSeconds > 0)
+          if (goal.lastStartTime && sessionSeconds > 0) {
+            await dataService.createGoalSession({
+              goal_id: goal.id,
+              start_time: new Date(goal.lastStartTime).toISOString(),
+              end_time: new Date(stopTime).toISOString(),
+              duration_seconds: sessionSeconds
+            });
+          }
+          
+          await dataService.updateGoal(goal.id, {
+            is_active: false,
+            total_seconds: newTotal,
+            last_start_time: null
+          });
+        }));
+        
+        // Refresh goals and goal sessions if any were stopped
         const [goalsData, goalSessionsData] = await Promise.all([
           dataService.getGoals(),
           dataService.getGoalSessions()
@@ -2000,21 +2013,25 @@ export default function TimeTrackerMVP() {
         })));
         
         setGoalSessions(goalSessionsData);
+      } else if (activeGoals.length > 0) {
+        // For unauthenticated users, update local state
+        setGoals(prev => prev.map(g => {
+          if (g.isActive) {
+            const sessionSeconds = g.lastStartTime ? Math.floor((stopTime - g.lastStartTime) / 1000) : 0;
+            return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
+          }
+          return g;
+        }));
       }
-    } else {
-      // Local state for unauthenticated users
-      setGoals(prev => prev.map(g => {
-        if (g.isActive) {
-          const now = Date.now();
-          const sessionSeconds = g.lastStartTime ? Math.floor((now - g.lastStartTime) / 1000) : 0;
-          return { ...g, isActive: false, totalSeconds: (g.totalSeconds || 0) + sessionSeconds, lastStartTime: undefined };
-        }
-        return g;
-      }));
+    } finally {
+      setIsProcessingTimer(false);
     }
   }
 
   const toggleCategory = useCallback(async (id: string) => {
+    // Prevent concurrent operations
+    if (isProcessingTimer) return;
+    
     // Check if this category is highlighted due to active children/goals
     const isHighlighted = isCategoryHighlighted(id);
     
