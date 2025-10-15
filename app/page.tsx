@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { PieChart, Pie, Cell, Tooltip } from "recharts";
-import { Plus, Check, Pencil, Trash2, ChevronRight } from "lucide-react";
+import { Plus, Check, Pencil, Trash2, ChevronRight, Clock } from "lucide-react";
 import { dataService } from "../lib/dataService";
 import { MigrationService } from "../lib/migrationService";
 
@@ -1418,6 +1418,8 @@ export default function TimeTrackerMVP() {
   const rangeMenuRef = useRef<boolean>(false);
   const [currentParentId, setCurrentParentId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false); // pencil toggle for overlay edit icons
+  const [sessionViewerOpen, setSessionViewerOpen] = useState(false);
+  const [sessionViewerCategoryId, setSessionViewerCategoryId] = useState<string | null>(null);
 
   // A ticking value that increments each second to drive live updates.
   // Pause the live tick while adding/editing to keep inputs snappy.
@@ -2399,6 +2401,42 @@ export default function TimeTrackerMVP() {
     setEditingId(null);
   }
 
+  // Session viewer functions
+  function openSessionViewer(categoryId: string) {
+    setSessionViewerCategoryId(categoryId);
+    setSessionViewerOpen(true);
+  }
+
+  function closeSessionViewer() {
+    setSessionViewerOpen(false);
+    setSessionViewerCategoryId(null);
+  }
+
+  async function deleteSession(sessionId: string) {
+    if (!confirm("Delete this session?")) return;
+    
+    if (isAuthenticated) {
+      try {
+        await dataService.deleteSession(sessionId);
+        
+        // Refresh sessions
+        const sessionsData = await dataService.getSessions();
+        setSessions(sessionsData.map(s => ({
+          id: s.id,
+          categoryId: s.category_id,
+          start: new Date(s.start_time).getTime(),
+          end: s.end_time ? new Date(s.end_time).getTime() : undefined
+        })));
+      } catch (error) {
+        console.error("Error deleting session:", error);
+        alert("Failed to delete session. Please try again.");
+      }
+    } else {
+      // For unauthenticated users, remove from local state
+      setSessions(prev => prev.filter(s => s.id !== sessionId));
+    }
+  }
+
   // UI helpers
   function sharePct(catId: string) {
     const category = categories.find(c => c.id === catId);
@@ -2698,13 +2736,22 @@ export default function TimeTrackerMVP() {
               >
                 {/* Overlay pencil (at all levels when edit mode is on) */}
                 {editMode && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); openEditor(c.id); }}
-                    className="absolute right-2 top-2 opacity-60 hover:opacity-100"
-                    title="Edit"
-                  >
-                    <Pencil size={14} />
-                  </button>
+                  <div className="absolute right-2 top-2 flex gap-2 p-2 bg-black/20 rounded-lg backdrop-blur-sm">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openSessionViewer(c.id); }}
+                      className="p-2 rounded-md bg-blue-600/20 hover:bg-blue-600/40 transition-colors"
+                      title="View Sessions"
+                    >
+                      <Clock size={16} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openEditor(c.id); }}
+                      className="p-2 rounded-md bg-gray-600/20 hover:bg-gray-600/40 transition-colors"
+                      title="Edit"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  </div>
                 )}
                 
                 <div className="flex items-center justify-between">
@@ -2867,6 +2914,64 @@ export default function TimeTrackerMVP() {
                   </div>
                 </>
               ); })()}
+          </div>
+        </div>
+      )}
+      
+      {/* Session Viewer Modal */}
+      {sessionViewerOpen && sessionViewerCategoryId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#161925] border border-[#1f2337] rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Sessions</h2>
+              <button 
+                onClick={closeSessionViewer}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              {(() => {
+                const category = categories.find(c => c.id === sessionViewerCategoryId);
+                if (!category) return null;
+                
+                const categorySessions = sessions.filter(s => s.categoryId === sessionViewerCategoryId);
+                
+                if (categorySessions.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-gray-400">
+                      No sessions found for this category
+                    </div>
+                  );
+                }
+                
+                return categorySessions.map(session => (
+                  <div key={session.id} className="flex items-center justify-between p-3 bg-[#0f1117] rounded-xl border border-[#1f2337]">
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">
+                        {new Date(session.start).toLocaleString()} 
+                        {session.end && (
+                          <span> to {new Date(session.end).toLocaleString()}</span>
+                        )}
+                      </div>
+                      {session.end && (
+                        <div className="text-xs text-gray-400 mt-1">
+                          {formatHMS(Math.floor((session.end - session.start) / 1000))}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      onClick={() => deleteSession(session.id)}
+                      className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 rounded-lg"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ));
+              })()}
+            </div>
           </div>
         </div>
       )}
