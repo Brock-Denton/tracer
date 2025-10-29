@@ -2454,6 +2454,26 @@ export default function TimeTrackerMVP() {
     }
   }
 
+  async function deleteGoalSession(goalSessionId: string) {
+    if (!confirm("Delete this goal session?")) return;
+    
+    if (isAuthenticated) {
+      try {
+        await dataService.deleteGoalSession(goalSessionId);
+        
+        // Refresh goal sessions
+        const goalSessionsData = await dataService.getGoalSessions();
+        setGoalSessions(goalSessionsData);
+      } catch (error) {
+        console.error("Error deleting goal session:", error);
+        alert("Failed to delete goal session. Please try again.");
+      }
+    } else {
+      // For unauthenticated users, remove from local state
+      setGoalSessions(prev => prev.filter(gs => gs.id !== goalSessionId));
+    }
+  }
+
   // UI helpers
   function sharePct(catId: string) {
     const category = categories.find(c => c.id === catId);
@@ -2954,9 +2974,50 @@ export default function TimeTrackerMVP() {
                 const category = categories.find(c => c.id === sessionViewerCategoryId);
                 if (!category) return null;
                 
-                const categorySessions = sessions.filter(s => s.categoryId === sessionViewerCategoryId);
+                // Find all descendant category IDs (including the category itself and all subcategories)
+                const getAllDescendantCategoryIds = (parentId: string): string[] => {
+                  const result = [parentId];
+                  const children = categories.filter(c => c.parentId === parentId);
+                  for (const child of children) {
+                    result.push(...getAllDescendantCategoryIds(child.id));
+                  }
+                  return result;
+                };
+                const categoryIds = getAllDescendantCategoryIds(sessionViewerCategoryId);
+                const categoryIdSet = new Set(categoryIds);
                 
-                if (categorySessions.length === 0) {
+                // Get regular sessions for this category and all its subcategories
+                const categorySessions = sessions.filter(s => categoryIdSet.has(s.categoryId));
+                
+                // Get goals in this category and all its subcategories
+                const categoryGoals = goals.filter(g => categoryIdSet.has(g.categoryId));
+                const categoryGoalIds = new Set(categoryGoals.map(g => g.id));
+                
+                // Get goal sessions for those goals
+                const categoryGoalSessions = goalSessions.filter(gs => categoryGoalIds.has(gs.goal_id));
+                
+                // Combine and sort by start time (most recent first)
+                const allSessions = [
+                  ...categorySessions.map(s => ({
+                    id: s.id,
+                    type: 'session' as const,
+                    start: s.start,
+                    end: s.end,
+                    goalName: null as string | null
+                  })),
+                  ...categoryGoalSessions.map(gs => {
+                    const goal = categoryGoals.find(g => g.id === gs.goal_id);
+                    return {
+                      id: gs.id,
+                      type: 'goalSession' as const,
+                      start: new Date(gs.start_time).getTime(),
+                      end: gs.end_time ? new Date(gs.end_time).getTime() : null,
+                      goalName: goal?.text || null
+                    };
+                  })
+                ].sort((a, b) => b.start - a.start); // Sort by start time, newest first
+                
+                if (allSessions.length === 0) {
                   return (
                     <div className="text-center py-8 text-gray-400">
                       No sessions found for this category
@@ -2964,29 +3025,44 @@ export default function TimeTrackerMVP() {
                   );
                 }
                 
-                return categorySessions.map(session => (
-                  <div key={session.id} className="flex items-center justify-between p-3 bg-[#0f1117] rounded-xl border border-[#1f2337]">
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">
-                        {new Date(session.start).toLocaleString()} 
-                        {session.end && (
-                          <span> to {new Date(session.end).toLocaleString()}</span>
+                return allSessions.map((item) => {
+                  const duration = item.end ? Math.floor((item.end - item.start) / 1000) : null;
+                  
+                  return (
+                    <div key={`${item.type}-${item.id}`} className="flex items-center justify-between p-3 bg-[#0f1117] rounded-xl border border-[#1f2337]">
+                      <div className="flex-1">
+                        {item.type === 'goalSession' && item.goalName && (
+                          <div className="text-xs text-blue-400 mb-1 font-medium">
+                            Goal: {item.goalName}
+                          </div>
+                        )}
+                        <div className="text-sm font-medium">
+                          {new Date(item.start).toLocaleString()} 
+                          {item.end && (
+                            <span> to {new Date(item.end).toLocaleString()}</span>
+                          )}
+                        </div>
+                        {duration !== null && (
+                          <div className="text-xs text-gray-400 mt-1">
+                            {formatHMS(duration)}
+                          </div>
                         )}
                       </div>
-                      {session.end && (
-                        <div className="text-xs text-gray-400 mt-1">
-                          {formatHMS(Math.floor((session.end - session.start) / 1000))}
-                        </div>
-                      )}
+                      <button 
+                        onClick={() => {
+                          if (item.type === 'session') {
+                            deleteSession(item.id);
+                          } else {
+                            deleteGoalSession(item.id);
+                          }
+                        }}
+                        className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 rounded-lg"
+                      >
+                        Delete
+                      </button>
                     </div>
-                    <button 
-                      onClick={() => deleteSession(session.id)}
-                      className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 rounded-lg"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ));
+                  );
+                });
               })()}
             </div>
           </div>
