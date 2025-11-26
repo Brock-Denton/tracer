@@ -578,7 +578,10 @@ function VisionPage({
           text: g.text,
           categoryId: g.category_id,
           completed: g.completed,
-          createdAt: new Date(g.created_at).getTime()
+          createdAt: new Date(g.created_at).getTime(),
+          totalSeconds: g.total_seconds || 0,
+          isActive: g.is_active || false,
+          lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
         })));
         setGoalText("");
       } catch (error) {
@@ -675,7 +678,10 @@ function VisionPage({
               text: g.text,
               categoryId: g.category_id,
               completed: g.completed,
-              createdAt: new Date(g.created_at).getTime()
+              createdAt: new Date(g.created_at).getTime(),
+              totalSeconds: g.total_seconds || 0,
+              isActive: g.is_active || false,
+              lastStartTime: g.last_start_time ? new Date(g.last_start_time).getTime() : undefined
             })));
           } catch (error) {
             console.error("Error updating goal:", error);
